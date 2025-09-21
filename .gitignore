@@ -1,0 +1,48 @@
+# Go项目标准.gitignore文件
+
+# 编译生成的二进制文件
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# 可执行文件
+/go2tv
+
+# 临时文件
+*.tmp
+*.temp
+*.log
+
+# 编辑器配置文件
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS生成的文件
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Go测试覆盖率
+*.out
+
+# Go模块下载的依赖
+/vendor/
+
+# 构建目录
+build/
+
+# 环境变量配置文件
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
