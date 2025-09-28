@@ -39,7 +39,7 @@ cd GoCastify
 go build
 
 # 运行应用
-./go2tv
+./GoCastify
 ```
 
 ## 使用说明
@@ -55,7 +55,7 @@ go build
 ## 项目结构
 
 ```
-go2tv/
+GoCastify/
 ├── app/           # 应用程序核心逻辑
 │   └── app.go     # 应用主逻辑实现
 ├── discovery/     # DLNA设备发现

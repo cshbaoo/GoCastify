@@ -54,7 +54,7 @@ type AudioTrack struct {
 // NewTranscoder 创建一个新的转码器
 func NewTranscoder() (*Transcoder, error) {
 	// 创建临时目录
-	tempDir, err := os.MkdirTemp("", "go2tv_transcode_")
+tempDir, err := os.MkdirTemp("", "gocastify_transcode_")
 	if err != nil {
 		return nil, fmt.Errorf("创建临时目录失败: %w", err)
 	}

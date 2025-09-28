@@ -13,18 +13,16 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
-	"GoCastify/app"
+
+	app "GoCastify/app"
 	"GoCastify/discovery"
 	"GoCastify/transcoder"
 )
 
 // BuildUI 构建应用程序的用户界面 - 按照苹果Human Interface Guidelines设计
 func BuildUI(app *app.App) fyne.CanvasObject {
-	// 创建标题 - 使用苹果风格的简洁标题
-	title := widget.NewLabel("Go2TV - DLNA投屏工具")
-	title.TextStyle = fyne.TextStyle{Bold: true, Italic: false} // 移除斜体，使用更专业的样式
-	title.Alignment = fyne.TextAlignCenter
-	title.Resize(fyne.NewSize(400, 36))
+	// 不需要自定义UI更新通道，使用Fyne的内置机制确保UI更新在主线程中执行
+
 
 	// 创建FFmpeg状态提示标签 - 清晰的状态显示
 	ffmpegStatusLabel := widget.NewLabel("FFmpeg: 未安装 (部分功能受限)")
@@ -73,7 +71,7 @@ func BuildUI(app *app.App) fyne.CanvasObject {
 		app.DeviceList.Refresh() // 刷新列表以显示选中状态
 	}
 
-	// 搜索设备按钮 - 使用苹果风格的操作按钮
+	// 创建搜索设备按钮 - 使用苹果风格的操作按钮
 	searchButton := widget.NewButton("搜索设备", func() {
 		// 如果已经有搜索上下文在运行，取消它
 		if app.SearchCancel != nil {
@@ -92,45 +90,50 @@ func BuildUI(app *app.App) fyne.CanvasObject {
 		// 更新状态标签
 		ffmpegStatusLabel.SetText("正在搜索DLNA设备...")
 
-		// 创建取消按钮
-		cancelButton := widget.NewButton("取消搜索", func() {
-			if app.SearchCancel != nil {
-				app.SearchCancel()
-				app.SearchCancel = nil
-			}
-		})
+		// 已经通过app.CreateSearchContext()创建了上下文和取消函数
+		// 不需要添加取消按钮，因为进度对话框会自动处理关闭
 
-		// 创建取消对话框
-		cancelDialog := dialog.NewCustomWithoutButtons("搜索设备",
-			container.NewVBox(
-				container.NewPadded(widget.NewLabel("正在搜索设备，请稍候...")),
-				container.NewCenter(cancelButton),
-			),
-			app.Window)
-		cancelDialog.Resize(fyne.NewSize(300, 120))
-		cancelDialog.Show()
-
-		// 在后台执行设备搜索
+		// 启动goroutine搜索设备
 		go func() {
-			devices, err := discovery.SearchDevicesWithContext(ctx, 10*time.Second)
+			// 搜索设备
+			devices, err := discovery.SearchDevicesWithContext(ctx, 8*time.Second)
 			if err != nil {
 				log.Printf("搜索设备失败: %v\n", err)
 			}
 
-			// 更新设备列表
-			app.Devices = devices
-			app.DeviceList.Refresh()
+			// 保存结果到临时变量
+			discoveredDevices := devices
 
-			// 更新状态标签
-			if len(devices) > 0 {
-				ffmpegStatusLabel.SetText(fmt.Sprintf("找到 %d 个DLNA设备", len(devices)))
-			} else {
-				ffmpegStatusLabel.SetText("未找到DLNA设备，请检查网络连接")
-			}
+			// 在主线程中更新UI - 使用Fyne的线程安全机制
+			fyne.CurrentApp().SendNotification(&fyne.Notification{Title: "设备搜索完成", Content: fmt.Sprintf("找到 %d 个设备", len(discoveredDevices))})
+			
+			// 使用time.AfterFunc确保UI更新在主线程中执行
+			time.AfterFunc(0, func() {
+				// 更新设备列表数据
+				app.Devices = discoveredDevices
 
-			// 关闭对话框
-			cancelDialog.Hide()
-			progress.Hide()
+				// 隐藏进度对话框
+				progress.Hide()
+
+				// 恢复FFmpeg状态显示
+				if app.FFmpegAvailable {
+					ffmpegStatusLabel.SetText("FFmpeg: 已安装 (支持完整功能)")
+				} else {
+					ffmpegStatusLabel.SetText("FFmpeg: 未安装 (部分功能受限)")
+				}
+
+				// 如果没有找到设备，显示提示
+				if len(discoveredDevices) == 0 {
+					dialog.ShowInformation("未找到设备", "未找到任何DLNA设备。\n请确保您的设备已开启并连接到同一网络。", app.Window)
+				}
+
+				// 刷新设备列表和窗口内容
+				app.DeviceList.Refresh()
+				app.Window.Canvas().Refresh(app.Window.Content())
+
+				// 清理
+				app.SearchCancel = nil
+			})
 		}()
 	})
 
@@ -148,7 +151,7 @@ audioSelectButton := widget.NewButton("选择音轨", func() {
 	})
 
 	selectFileButton := widget.NewButton("选择文件", func() {
-		// 创建自定义中文文件选择对话框
+		// 创建符合macOS风格的文件选择对话框
 		fileFilter := &videoFileFilter{}
 		obtainer := dialog.NewFileOpen(func(file fyne.URIReadCloser, err error) {
 			if err != nil {
@@ -182,8 +185,9 @@ audioSelectButton := widget.NewButton("选择音轨", func() {
 		}, app.Window)
 		// 设置文件过滤器
 		obtainer.SetFilter(fileFilter)
-		// 调整对话框大小以符合苹果设计风格
-		obtainer.Resize(fyne.NewSize(600, 400))
+		// 设置对话框属性以符合macOS设计风格
+		obtainer.SetConfirmText("打开")
+		obtainer.Resize(fyne.NewSize(800, 600))
 		obtainer.Show()
 	})
 
@@ -304,7 +308,6 @@ audioSelectButton := widget.NewButton("选择音轨", func() {
 	// 主内容布局 - 符合苹果HIG的间距和分组
 	content := container.NewPadded(
 		container.NewVBox(
-			fyne.NewContainerWithLayout(layout.NewCenterLayout(), title),
 			fyne.NewContainerWithLayout(layout.NewCenterLayout(), ffmpegStatusContainer),
 			layout.NewSpacer(), // 增加间距
 			widget.NewSeparator(),

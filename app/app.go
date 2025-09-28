@@ -38,6 +38,7 @@ type AudioTrack struct {
 // App 表示整个应用程序的状态和功能
 type App struct {
 	Window              fyne.Window
+	FyneApp             fyne.App
 	Devices             []discovery.DeviceInfo
 	SelectedDeviceIndex int
 	MediaFile           string
@@ -52,7 +53,7 @@ type App struct {
 }
 
 // NewApp 创建一个新的应用程序实例
-func NewApp(window fyne.Window) (*App, error) {
+func NewApp(fyneApp fyne.App, window fyne.Window) (*App, error) {
 	// 创建媒体服务器
 	mediaServer, err := server.NewMediaServer(8080)
 	if err != nil {
@@ -66,6 +67,7 @@ func NewApp(window fyne.Window) (*App, error) {
 
 	return &App{
 		Window:              window,
+		FyneApp:             fyneApp,
 		Devices:             []discovery.DeviceInfo{},
 		SelectedDeviceIndex: -1,
 		MediaFile:           "",
@@ -271,17 +273,17 @@ func (app *App) SelectAudio(audioLabel *widget.Label) {
 		descriptionLabel := widget.NewLabel("请选择您想要使用的音频轨道：")
 		descriptionLabel.TextStyle = fyne.TextStyle{Bold: true} // 标题使用粗体
 
-		// 创建符合苹果设计规范的对话框布局
+		// 创建符合macOS设计规范的对话框布局
 		dialogContent := container.NewVBox(
 			container.NewPadded(descriptionLabel),
 			widget.NewSeparator(), // 分隔线增强视觉层次
 			container.NewPadded(paddedList),
 		)
 
-		// 创建带有取消按钮的自定义对话框，符合苹果UI设计标准
+		// 创建带有取消按钮的自定义对话框，符合macOS UI设计标准
 		audioDialog := dialog.NewCustomConfirm("选择音频轨道", "确定", "取消", dialogContent, func(confirmed bool) {}, app.Window)
-		// 调整对话框大小以符合苹果设计风格
-		audioDialog.Resize(fyne.NewSize(500, 400))
+		// 调整对话框大小以符合macOS设计风格
+		audioDialog.Resize(fyne.NewSize(600, 450))
 
 		// 修复重复显示的问题
 		// audioDialog.Show() 会在后面的OnSelected设置完成后调用
@@ -414,17 +416,21 @@ func (app *App) SelectSubtitle(subtitleLabel *widget.Label) {
 
 		// 创建自定义列表的容器，增加内边距
 		paddedList := container.NewPadded(subtitleList)
-		listContainer := container.NewVBox(paddedList)
 
-		// 创建字幕选择对话框，符合苹果UI设计标准
-		subtitleDialog := dialog.NewCustom(
-			"选择字幕轨道",
-			"确定",
-			listContainer,
-			app.Window,
+		// 创建符合macOS设计规范的对话框布局
+		label := widget.NewLabel("请选择您想要使用的字幕轨道")
+		label.Alignment = fyne.TextAlignCenter
+		label.TextStyle = fyne.TextStyle{Bold: true}
+		dialogContent := container.NewVBox(
+			container.NewPadded(label),
+			widget.NewSeparator(), // 分隔线增强视觉层次
+			container.NewPadded(paddedList),
 		)
-		// 调整对话框大小以符合苹果设计风格
-		subtitleDialog.Resize(fyne.NewSize(500, 400))
+
+		// 创建带有取消按钮的自定义对话框，符合macOS UI设计标准
+		subtitleDialog := dialog.NewCustomConfirm("选择字幕轨道", "确定", "取消", dialogContent, func(confirmed bool) {}, app.Window)
+		// 调整对话框大小以符合macOS设计风格
+		subtitleDialog.Resize(fyne.NewSize(600, 450))
 
 		// 设置列表选择事件
 		subtitleList.OnSelected = func(id widget.ListItemID) {
