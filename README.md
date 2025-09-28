@@ -1,6 +1,6 @@
-# Go2TV - DLNA投屏工具
+# GoCastify - DLNA投屏工具
 
-Go2TV是一款基于Go语言开发的DLNA投屏工具，允许用户轻松将本地媒体文件（视频、音频）投射到支持DLNA的设备上，如智能电视、音响等。
+GoCastify是一款基于Go语言开发的DLNA投屏工具，允许用户轻松将本地媒体文件（视频、音频）投射到支持DLNA的设备上，如智能电视、音响等。
 
 ## 功能特性
 
@@ -32,8 +32,8 @@ Go2TV是一款基于Go语言开发的DLNA投屏工具，允许用户轻松将本
 
 ```bash
 # 克隆仓库
-git clone https://github.com/cshbaoo/go2tv.git
-cd go2tv
+git clone https://github.com/cshbaoo/GoCastify.git
+cd GoCastify
 
 # 编译项目
 go build
@@ -44,7 +44,7 @@ go build
 
 ## 使用说明
 
-1. 启动Go2TV应用程序
+1. 启动GoCastify应用程序
 2. 应用会自动搜索局域网内的DLNA设备
 3. 点击"选择文件"按钮，选择要投屏的媒体文件
 4. 可选：点击"选择音轨"按钮，选择要使用的音频轨道
