@@ -57,80 +57,83 @@ func SearchDevicesWithContext(ctx context.Context, timeout time.Duration) ([]Dev
 	// 使用WaitGroup等待所有搜索和处理完成
 	var wg sync.WaitGroup
 	var resultMutex sync.Mutex
+	// 使用信号量限制并发数量，避免过多的并发请求
+	semaphore := make(chan struct{}, 5) // 限制最多5个并发请求
+
+	// 搜索结果处理函数
+	processResult := func(res ssdp.Service) {
+		defer func() {
+			<-semaphore // 释放信号量
+			wg.Done()
+		}()
+
+		// 检查是否已取消
+		if searchCtx.Err() != nil {
+			return
+		}
+
+		// 创建一个带超时的上下文用于单个设备详情请求
+		detailCtx, cancelDetail := context.WithTimeout(searchCtx, 3*time.Second)
+		defer cancelDetail()
+
+		// 获取设备详情
+		detail, err := getDeviceDetailsWithContext(detailCtx, res.Location)
+		if err != nil {
+			log.Printf("获取设备详情失败(%s): %v\n", res.Location, err)
+			return
+		}
+
+		// 创建设备信息
+		device := DeviceInfo{
+			USN:         res.USN,
+			Location:    res.Location,
+			Server:      res.Server,
+			FriendlyName: detail.Device.FriendlyName,
+			UDN:         detail.Device.UDN,
+		}
+
+		// 使用UDN作为键进行去重
+		resultMutex.Lock()
+		allDevices[device.UDN] = device
+		resultMutex.Unlock()
+	}
 
 	// 对每种设备类型进行搜索
 	for _, deviceType := range deviceTypes {
 		// 检查是否已取消
 		if searchCtx.Err() != nil {
-			log.Printf("搜索上下文已取消(%v)，但继续收集已找到的设备", searchCtx.Err())
-			// 不立即返回，而是继续处理已找到的设备
+			log.Printf("搜索上下文已取消(%v)，停止新的搜索", searchCtx.Err())
 			break
 		}
 
-		wg.Add(1)
-		go func(deviceType string) {
-			defer wg.Done()
-			
-			log.Printf("开始搜索设备类型: %s，超时时间: %v\n", deviceType, timeout/2)
+		log.Printf("开始搜索设备类型: %s，超时时间: %v\n", deviceType, timeout/2)
 
-			// 执行搜索
-			results, err := ssdp.Search(deviceType, int((timeout/2).Seconds()), "")
-			if err != nil {
-				log.Printf("搜索设备类型 %s 失败: %v\n", deviceType, err)
-				return
-			}
+		// 执行搜索
+		results, err := ssdp.Search(deviceType, int((timeout/2).Seconds()), "")
+		if err != nil {
+			log.Printf("搜索设备类型 %s 失败: %v\n", deviceType, err)
+			continue
+		}
 
-			// 处理每个搜索结果
-			for _, res := range results {
-				// 检查是否已取消
-				if searchCtx.Err() != nil {
-					break
-				}
-
-				// 避免重复处理同一Location
-				resultMutex.Lock()
-				if processedLocations[res.Location] {
-					resultMutex.Unlock()
-					continue
-				}
-				processedLocations[res.Location] = true
+		// 处理每个搜索结果
+		for _, res := range results {
+			// 避免重复处理同一Location
+			resultMutex.Lock()
+			if processedLocations[res.Location] {
 				resultMutex.Unlock()
-
-				wg.Add(1)
-				go func(res ssdp.Service) {
-					defer wg.Done()
-
-					// 创建一个带超时的上下文用于单个设备详情请求
-					detailCtx, cancelDetail := context.WithTimeout(searchCtx, 3*time.Second)
-					defer cancelDetail()
-
-					// 获取设备详情
-					detail, err := getDeviceDetailsWithContext(detailCtx, res.Location)
-					if err != nil {
-						// 忽略单个设备的错误，继续处理其他设备
-						log.Printf("获取设备详情失败: %v\n", err)
-						return
-					}
-
-					// 创建设备信息
-					device := DeviceInfo{
-						USN:         res.USN,
-						Location:    res.Location,
-						Server:      res.Server,
-						FriendlyName: detail.Device.FriendlyName,
-						UDN:         detail.Device.UDN,
-					}
-
-					// 使用UDN作为键进行去重
-					resultMutex.Lock()
-					allDevices[device.UDN] = device
-					resultMutex.Unlock()
-				}(res)
+				continue
 			}
-		}(deviceType)
+			processedLocations[res.Location] = true
+			resultMutex.Unlock()
+
+			// 等待获取信号量
+			semaphore <- struct{}{}
+			wg.Add(1)
+			go processResult(res)
+		}
 	}
 
-	// 等待所有goroutine完成
+	// 等待所有搜索和处理完成
 	doneChan := make(chan struct{})
 	go func() {
 		wg.Wait()

@@ -32,4 +32,7 @@ func main() {
 
 	// 运行应用程序
 	window.ShowAndRun()
+
+	// 应用程序退出时清理资源
+	appInstance.Cleanup()
 }

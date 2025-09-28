@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"GoCastify/types"
 )
 
 // Transcoder 处理媒体格式检测和转码
@@ -24,31 +25,14 @@ type Transcoder struct {
 	// 临时文件存储
 	tempDir string
 	// 字幕轨道信息缓存
-	subtitleTracks map[string][]SubtitleTrack
+	subtitleTracks map[string][]types.SubtitleTrack
 	subtitleMutex  sync.Mutex
 	// 音频轨道信息缓存
-	audioTracks map[string][]AudioTrack
+	audioTracks map[string][]types.AudioTrack
 	audioMutex  sync.Mutex
 	// 限制并发转码任务数量
 	maxConcurrentTranscodes int
 	semaphore              chan struct{}
-}
-
-// SubtitleTrack 表示媒体文件中的字幕轨道信息
-type SubtitleTrack struct {
-	Index     int
-	Language  string
-	Title     string
-	IsDefault bool
-}
-
-// AudioTrack 表示媒体文件中的音频轨道信息
-type AudioTrack struct {
-	Index     int
-	Language  string
-	Title     string
-	CodecName string
-	IsDefault bool
 }
 
 // NewTranscoder 创建一个新的转码器
@@ -71,9 +55,9 @@ tempDir, err := os.MkdirTemp("", "gocastify_transcode_")
 		cacheMutex:              sync.Mutex{},
 		cacheExpiry:             make(map[string]time.Time),
 		tempDir:                 tempDir,
-		subtitleTracks:          make(map[string][]SubtitleTrack),
+		subtitleTracks:          make(map[string][]types.SubtitleTrack),
 		subtitleMutex:           sync.Mutex{},
-		audioTracks:             make(map[string][]AudioTrack),
+		audioTracks:             make(map[string][]types.AudioTrack),
 		audioMutex:              sync.Mutex{},
 		maxConcurrentTranscodes: maxConcurrentTranscodes,
 		semaphore:               make(chan struct{}, maxConcurrentTranscodes),
@@ -169,7 +153,7 @@ func (t *Transcoder) GetMediaInfo(filePath string) (map[string]string, error) {
 }
 
 // GetSubtitleTracks 获取媒体文件中的字幕轨道信息
-func (t *Transcoder) GetSubtitleTracks(filePath string) ([]SubtitleTrack, error) {
+func (t *Transcoder) GetSubtitleTracks(filePath string) ([]types.SubtitleTrack, error) {
 	// 检查缓存中是否已有该文件的字幕轨道信息
 	t.subtitleMutex.Lock()
 	cachedTracks, exists := t.subtitleTracks[filePath]
@@ -196,7 +180,7 @@ func (t *Transcoder) GetSubtitleTracks(filePath string) ([]SubtitleTrack, error)
 		return nil, fmt.Errorf("获取字幕轨道信息失败: %w, 输出: %s", err, string(output))
 	}
 
-	tracks := []SubtitleTrack{}
+	tracks := []types.SubtitleTrack{}
 	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 
 	for _, line := range lines {
@@ -206,7 +190,7 @@ func (t *Transcoder) GetSubtitleTracks(filePath string) ([]SubtitleTrack, error)
 
 		// 解析CSV格式的输出: index,language,title
 		parts := strings.Split(line, ",")
-		track := SubtitleTrack{
+		track := types.SubtitleTrack{
 			IsDefault: false,
 		}
 
@@ -242,7 +226,7 @@ func (t *Transcoder) GetSubtitleTracks(filePath string) ([]SubtitleTrack, error)
 }
 
 // GetAudioTracks 获取媒体文件中的音频轨道信息
-func (t *Transcoder) GetAudioTracks(filePath string) ([]AudioTrack, error) {
+func (t *Transcoder) GetAudioTracks(filePath string) ([]types.AudioTrack, error) {
 	// 检查缓存中是否已有该文件的音频轨道信息
 	t.audioMutex.Lock()
 	cachedTracks, exists := t.audioTracks[filePath]
@@ -269,7 +253,7 @@ func (t *Transcoder) GetAudioTracks(filePath string) ([]AudioTrack, error) {
 		return nil, fmt.Errorf("获取音频轨道信息失败: %w, 输出: %s", err, string(output))
 	}
 
-	tracks := []AudioTrack{}
+	tracks := []types.AudioTrack{}
 	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
 
 	for _, line := range lines {
@@ -279,7 +263,7 @@ func (t *Transcoder) GetAudioTracks(filePath string) ([]AudioTrack, error) {
 
 		// 解析CSV格式的输出: index,language,title,codec_name
 		parts := strings.Split(line, ",")
-		track := AudioTrack{
+		track := types.AudioTrack{
 			IsDefault: false,
 		}
 

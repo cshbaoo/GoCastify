@@ -6,56 +6,50 @@ import (
 	"log"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
+
 	"GoCastify/discovery"
 	"GoCastify/dlna"
 	"GoCastify/server"
 	"GoCastify/transcoder"
+	"GoCastify/types"
 )
 
-// SubtitleTrack 表示媒体文件中的字幕轨道信息
-type SubtitleTrack struct {
-	Index     int
-	Language  string
-	Title     string
-	IsDefault bool
-}
-
-// AudioTrack 表示媒体文件中的音频轨道信息
-type AudioTrack struct {
-	Index     int
-	Language  string
-	Title     string
-	CodecName string
-	IsDefault bool
-}
+// 常量定义
+const (
+	defaultMediaServerPort = 8080
+	dialogWidth            = 600
+	dialogHeight           = 450
+)
 
 // App 表示整个应用程序的状态和功能
 type App struct {
-	Window              fyne.Window
-	FyneApp             fyne.App
-	Devices             []discovery.DeviceInfo
-	SelectedDeviceIndex int
-	MediaFile           string
-	MediaServer         *server.MediaServer
-	FFmpegAvailable     bool
-	SubtitleTracks      []SubtitleTrack
+	Window               fyne.Window
+	FyneApp              fyne.App
+	Devices              []discovery.DeviceInfo
+	SelectedDeviceIndex  int
+	MediaFile            string
+	MediaServer          *server.MediaServer
+	FFmpegAvailable      bool
+	SubtitleTracks       []types.SubtitleTrack
 	SelectedSubtitleIndex int
-	AudioTracks         []AudioTrack
-	SelectedAudioIndex  int
-	SearchCancel        context.CancelFunc
-	DeviceList          *widget.List
+	AudioTracks          []types.AudioTrack
+	SelectedAudioIndex   int
+	SearchCancel         context.CancelFunc
+	DeviceList           *widget.List
 }
 
 // NewApp 创建一个新的应用程序实例
 func NewApp(fyneApp fyne.App, window fyne.Window) (*App, error) {
 	// 创建媒体服务器
-	mediaServer, err := server.NewMediaServer(8080)
+	mediaServer, err := server.NewMediaServer(defaultMediaServerPort)
 	if err != nil {
 		log.Printf("创建媒体服务器失败: %v\n", err)
 		// 继续运行，因为没有媒体服务器仍然可以提供基本功能
@@ -66,19 +60,18 @@ func NewApp(fyneApp fyne.App, window fyne.Window) (*App, error) {
 	ffmpegAvailable := transcoder.CheckFFmpeg()
 
 	return &App{
-		Window:              window,
-		FyneApp:             fyneApp,
-		Devices:             []discovery.DeviceInfo{},
-		SelectedDeviceIndex: -1,
-		MediaFile:           "",
-		MediaServer:         mediaServer,
-		FFmpegAvailable:     ffmpegAvailable,
-		SubtitleTracks:      []SubtitleTrack{},
+		Window:               window,
+		FyneApp:              fyneApp,
+		Devices:              []discovery.DeviceInfo{},
+		SelectedDeviceIndex:  -1,
+		MediaFile:            "",
+		MediaServer:          mediaServer,
+		FFmpegAvailable:      ffmpegAvailable,
+		SubtitleTracks:       []types.SubtitleTrack{},
 		SelectedSubtitleIndex: -1,
-		AudioTracks:         []AudioTrack{},
-		SelectedAudioIndex:  -1,
-	},
-		nil
+		AudioTracks:          []types.AudioTrack{},
+		SelectedAudioIndex:   -1,
+	}, nil
 }
 
 // CreateSearchContext 创建一个用于设备搜索的上下文
@@ -86,18 +79,15 @@ func (app *App) CreateSearchContext() (context.Context, context.CancelFunc) {
 	return context.WithCancel(context.Background())
 }
 
-// StartCasting 开始投屏操作
-func (app *App) StartCasting(progress *dialog.ProgressDialog) {
+// StartCastingWithContext 开始投屏操作（带上下文支持）
+func (app *App) StartCastingWithContext(ctx context.Context, progress *dialog.ProgressDialog) error {
 	selectedDevice := app.Devices[app.SelectedDeviceIndex]
 	log.Printf("连接设备: %s, 地址: %s\n", selectedDevice.FriendlyName, selectedDevice.Location)
 
 	// 创建设备控制器
-	controller, err := dlna.NewDeviceController(selectedDevice.Location)
+	controller, err := dlna.NewDeviceControllerWithContext(ctx, selectedDevice.Location)
 	if err != nil {
-		log.Printf("创建设备控制器失败: %v\n", err)
-		dialog.ShowError(err, app.Window)
-		progress.Hide()
-		return
+		return fmt.Errorf("创建设备控制器失败: %w", err)
 	}
 
 	// 获取文件所在目录
@@ -109,10 +99,7 @@ func (app *App) StartCasting(progress *dialog.ProgressDialog) {
 	if app.MediaServer != nil {
 		serverURL, err = app.MediaServer.Start(mediaDir)
 		if err != nil {
-			log.Printf("启动媒体服务器失败: %v\n", err)
-			dialog.ShowError(err, app.Window)
-			progress.Hide()
-			return
+			return fmt.Errorf("启动媒体服务器失败: %w", err)
 		}
 	} else {
 		// 如果没有媒体服务器，使用本地文件路径（这可能只在某些设备上工作）
@@ -120,28 +107,31 @@ func (app *App) StartCasting(progress *dialog.ProgressDialog) {
 	}
 
 	// 构建媒体文件的完整URL
-	mediaURL := serverURL + "/" + fileName
-	// 如果选择了字幕轨道，添加字幕参数
-	if app.SelectedSubtitleIndex >= 0 {
-		mediaURL += "?subtitle=" + strconv.Itoa(app.SelectedSubtitleIndex)
-		// 如果同时选择了音频轨道，添加音频参数
-		if app.SelectedAudioIndex >= 0 {
-			// 使用实际选择的音频轨道索引
-			mediaURL += "&audio=" + strconv.Itoa(app.SelectedAudioIndex)
-		}
-	} else if app.SelectedAudioIndex >= 0 {
-		// 只有音频轨道参数
-		mediaURL += "?audio=" + strconv.Itoa(app.SelectedAudioIndex)
-	}
+	mediaURL := app.buildMediaURL(serverURL, fileName)
 	log.Printf("媒体文件URL: %s\n", mediaURL)
 
 	// 播放媒体
-	err = controller.PlayMedia(mediaURL)
+	err = controller.PlayMediaWithContext(ctx, mediaURL)
 	if err != nil {
-		log.Printf("投屏失败: %v\n", err)
+		return fmt.Errorf("投屏失败: %w", err)
+	}
+
+	log.Printf("投屏成功: %s\n", filepath.Base(app.MediaFile))
+	return nil
+}
+
+// StartCasting 开始投屏操作（兼容旧接口）
+func (app *App) StartCasting(progress *dialog.ProgressDialog) {
+	// 创建一个带有超时的上下文
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// 执行带上下文的投屏操作
+	err := app.StartCastingWithContext(ctx, progress)
+	if err != nil {
+		log.Printf("投屏操作失败: %v\n", err)
 		dialog.ShowError(err, app.Window)
 	} else {
-		log.Printf("投屏成功: %s\n", filepath.Base(app.MediaFile))
 		dialog.ShowInformation("成功", "投屏成功！\n媒体文件正在通过HTTP服务器提供", app.Window)
 	}
 
@@ -186,9 +176,9 @@ func (app *App) SelectAudio(audioLabel *widget.Label) {
 		}
 
 		// 保存音频轨道信息
-		app.AudioTracks = []AudioTrack{}
+		app.AudioTracks = []types.AudioTrack{}
 		for _, track := range audioTracks {
-			app.AudioTracks = append(app.AudioTracks, AudioTrack{
+			app.AudioTracks = append(app.AudioTracks, types.AudioTrack{
 				Index:     track.Index,
 				Language:  track.Language,
 				Title:     track.Title,
@@ -280,10 +270,10 @@ func (app *App) SelectAudio(audioLabel *widget.Label) {
 			container.NewPadded(paddedList),
 		)
 
-		// 创建带有取消按钮的自定义对话框，符合macOS UI设计标准
+			// 创建带有取消按钮的自定义对话框，符合macOS UI设计标准
 		audioDialog := dialog.NewCustomConfirm("选择音频轨道", "确定", "取消", dialogContent, func(confirmed bool) {}, app.Window)
 		// 调整对话框大小以符合macOS设计风格
-		audioDialog.Resize(fyne.NewSize(600, 450))
+		audioDialog.Resize(fyne.NewSize(dialogWidth, dialogHeight))
 
 		// 修复重复显示的问题
 		// audioDialog.Show() 会在后面的OnSelected设置完成后调用
@@ -309,7 +299,7 @@ func (app *App) SelectAudio(audioLabel *widget.Label) {
 		}
 
 		// 显示音频选择对话框
-	audioDialog.Show()
+		audioDialog.Show()
 	}()
 }
 
@@ -351,9 +341,9 @@ func (app *App) SelectSubtitle(subtitleLabel *widget.Label) {
 		}
 
 		// 保存字幕轨道信息
-		app.SubtitleTracks = []SubtitleTrack{}
+		app.SubtitleTracks = []types.SubtitleTrack{}
 		for _, track := range subtitleTracks {
-			app.SubtitleTracks = append(app.SubtitleTracks, SubtitleTrack{
+			app.SubtitleTracks = append(app.SubtitleTracks, types.SubtitleTrack{
 				Index:     track.Index,
 				Language:  track.Language,
 				Title:     track.Title,
@@ -427,10 +417,10 @@ func (app *App) SelectSubtitle(subtitleLabel *widget.Label) {
 			container.NewPadded(paddedList),
 		)
 
-		// 创建带有取消按钮的自定义对话框，符合macOS UI设计标准
+			// 创建带有取消按钮的自定义对话框，符合macOS UI设计标准
 		subtitleDialog := dialog.NewCustomConfirm("选择字幕轨道", "确定", "取消", dialogContent, func(confirmed bool) {}, app.Window)
 		// 调整对话框大小以符合macOS设计风格
-		subtitleDialog.Resize(fyne.NewSize(600, 450))
+		subtitleDialog.Resize(fyne.NewSize(dialogWidth, dialogHeight))
 
 		// 设置列表选择事件
 		subtitleList.OnSelected = func(id widget.ListItemID) {
@@ -452,7 +442,49 @@ func (app *App) SelectSubtitle(subtitleLabel *widget.Label) {
 			subtitleDialog.Hide()
 		}
 
-		// 显示字幕选择对话框
+			// 显示字幕选择对话框
 		subtitleDialog.Show()
 	}()
+}
+
+// buildMediaURL 构建媒体文件的完整URL，包括可选的字幕和音频参数
+func (app *App) buildMediaURL(serverURL, fileName string) string {
+	mediaURL := serverURL + "/" + fileName
+	
+	// 添加查询参数
+	params := []string{}
+	if app.SelectedSubtitleIndex >= 0 {
+		params = append(params, "subtitle="+strconv.Itoa(app.SelectedSubtitleIndex))
+	}
+	if app.SelectedAudioIndex >= 0 {
+		params = append(params, "audio="+strconv.Itoa(app.SelectedAudioIndex))
+	}
+	
+	// 拼接查询参数
+	if len(params) > 0 {
+		mediaURL += "?" + strings.Join(params, "&")
+	}
+	
+	return mediaURL
+}
+
+// Cleanup 清理应用资源
+func (app *App) Cleanup() {
+	// 停止设备搜索
+	if app.SearchCancel != nil {
+		app.SearchCancel()
+		app.SearchCancel = nil
+	}
+
+	// 停止媒体服务器
+	if app.MediaServer != nil {
+		if err := app.MediaServer.Stop(); err != nil {
+			log.Printf("停止媒体服务器时出错: %v\n", err)
+		}
+		app.MediaServer = nil
+	}
+
+	// 清空设备列表
+	app.Devices = nil
+	app.SelectedDeviceIndex = -1
 }

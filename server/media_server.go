@@ -17,6 +17,15 @@ import (
 	"GoCastify/transcoder"
 )
 
+// 常量定义
+const (
+	defaultBufferSize    = 32 * 1024  // 32KB 缓冲区
+	httpReadTimeout      = 30 * time.Second
+	httpWriteTimeout     = 30 * time.Second
+	httpIdleTimeout      = 120 * time.Second
+	serverShutdownTimeout = 5 * time.Second
+)
+
 // MediaServer 提供媒体文件的HTTP服务器
 type MediaServer struct {
 	httpServer *http.Server
@@ -62,106 +71,17 @@ func (ms *MediaServer) Start(mediaPath string) (string, error) {
 	// 创建HTTP处理器
 	handler := http.NewServeMux()
 	// 处理根路径，提供媒体文件的目录列表
-	handler.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		// 记录请求
-		log.Printf("收到请求: %s %s\n", r.Method, r.URL.Path)
+		handler.HandleFunc("/", ms.handleMediaRequest)
 
-		// 获取请求的文件路径
-		filePath := filepath.Join(mediaPath, r.URL.Path)
-
-		// 检查文件是否存在
-		_, err := os.Stat(filePath)
-		if os.IsNotExist(err) {
-			http.NotFound(w, r)
-			return
-		} else if err != nil {
-			http.Error(w, "Internal Server Error", http.StatusInternalServerError)
-			log.Printf("检查文件失败: %v\n", err)
-			return
-		}
-
-		// 设置CORS头，允许跨域请求
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Range")
-
-		// 处理OPTIONS请求
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		// 检查是否需要转码
-		supported, needTranscode := transcoder.IsSupportedFormat(filePath)
-		if !supported {
-			http.Error(w, "不支持的媒体格式", http.StatusUnsupportedMediaType)
-			log.Printf("不支持的媒体格式: %s\n", filePath)
-			return
-		}
-
-		// 如果不需要转码，高效提供文件
-		if !needTranscode {
-			ms.serveFileEfficiently(w, r, filePath)
-			return
-		}
-
-		// 需要转码，检查是否启用了转码功能
-		if ms.transcoder == nil {
-			http.Error(w, "转码功能未初始化", http.StatusInternalServerError)
-			log.Printf("转码功能未初始化\n")
-			return
-		}
-
-		// 检查FFmpeg是否可用
-		if !transcoder.CheckFFmpeg() {
-			http.Error(w, "未找到FFmpeg，无法转码。请先安装FFmpeg。", http.StatusInternalServerError)
-			log.Printf("未找到FFmpeg，无法转码\n")
-			return
-		}
-
-			// 获取URL中的字幕轨道参数
-		subtitleTrackIndex := -1
-		subtitleParam := r.URL.Query().Get("subtitle")
-		if subtitleParam != "" {
-			var err error
-			subtitleTrackIndex, err = strconv.Atoi(subtitleParam)
-			if err != nil {
-				log.Printf("无效的字幕轨道索引: %s, 使用默认值(-1)", subtitleParam)
-				subtitleTrackIndex = -1
-			}
-		}
-
-		// 获取URL中的音频轨道参数
-		audioTrackIndex := -1
-		audioParam := r.URL.Query().Get("audio")
-		if audioParam != "" {
-			var err error
-			audioTrackIndex, err = strconv.Atoi(audioParam)
-			if err != nil {
-				log.Printf("无效的音频轨道索引: %s, 使用默认值(-1)", audioParam)
-				audioTrackIndex = -1
-			}
-		}
-
-		// 对于需要转码的文件，我们提供转码后的临时文件
-		transcodedFile, err := ms.transcoder.TranscodeToMp4(filePath, subtitleTrackIndex, audioTrackIndex)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("转码失败: %v", err), http.StatusInternalServerError)
-			log.Printf("转码失败: %v\n", err)
-			return
-		}
-
-		// 高效提供转码后的文件
-			ms.serveFileEfficiently(w, r, transcodedFile)
-	})
+		// 创建HTTP服务器
 
 	// 创建HTTP服务器
 	ms.httpServer = &http.Server{
 		Addr:         fmt.Sprintf(":%d", ms.port),
 		Handler:      handler,
-		ReadTimeout:  30 * time.Second,  // 增加读取超时
-		WriteTimeout: 30 * time.Second,  // 增加写入超时
-		IdleTimeout:  120 * time.Second, // 增加空闲超时
+		ReadTimeout:  httpReadTimeout,
+		WriteTimeout: httpWriteTimeout,
+		IdleTimeout:  httpIdleTimeout,
 	}
 
 	// 在后台启动服务器
@@ -192,7 +112,7 @@ func (ms *MediaServer) Stop() error {
 	}
 
 	// 创建一个有超时的上下文
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), serverShutdownTimeout)
 	defer cancel()
 
 	// 关闭服务器
@@ -223,6 +143,113 @@ func (ms *MediaServer) GetServerURL() string {
 	}
 
 	return fmt.Sprintf("http://%s:%d", ip, ms.port)
+}
+
+// handleMediaRequest 处理媒体文件请求
+func (ms *MediaServer) handleMediaRequest(w http.ResponseWriter, r *http.Request) {
+	// 记录请求
+	log.Printf("收到请求: %s %s\n", r.Method, r.URL.Path)
+
+	// 获取请求的文件路径
+	filePath := filepath.Join(ms.mediaPath, r.URL.Path)
+
+	// 检查文件是否存在
+	if !ms.fileExists(filePath) {
+		http.NotFound(w, r)
+		return
+	}
+
+	// 设置CORS头，允许跨域请求
+	ms.setCORSHeaders(w)
+
+	// 处理OPTIONS请求
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// 检查是否需要转码
+	supported, needTranscode := transcoder.IsSupportedFormat(filePath)
+	if !supported {
+		http.Error(w, "不支持的媒体格式", http.StatusUnsupportedMediaType)
+		log.Printf("不支持的媒体格式: %s\n", filePath)
+		return
+	}
+
+	// 如果不需要转码，直接提供文件
+	if !needTranscode {
+		ms.serveFileEfficiently(w, r, filePath)
+		return
+	}
+
+	// 处理需要转码的文件
+	ms.handleTranscodedMedia(w, r, filePath)
+}
+
+// fileExists 检查文件是否存在
+func (ms *MediaServer) fileExists(filePath string) bool {
+	_, err := os.Stat(filePath)
+	if os.IsNotExist(err) {
+		return false
+	}
+	if err != nil {
+		log.Printf("检查文件失败: %v\n", err)
+	}
+	return err == nil
+}
+
+// setCORSHeaders 设置CORS响应头
+func (ms *MediaServer) setCORSHeaders(w http.ResponseWriter) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Range")
+}
+
+// handleTranscodedMedia 处理需要转码的媒体文件
+func (ms *MediaServer) handleTranscodedMedia(w http.ResponseWriter, r *http.Request, filePath string) {
+	// 检查是否启用了转码功能
+	if ms.transcoder == nil {
+		http.Error(w, "转码功能未初始化", http.StatusInternalServerError)
+		log.Printf("转码功能未初始化\n")
+		return
+	}
+
+	// 检查FFmpeg是否可用
+	if !transcoder.CheckFFmpeg() {
+		http.Error(w, "未找到FFmpeg，无法转码。请先安装FFmpeg。", http.StatusInternalServerError)
+		log.Printf("未找到FFmpeg，无法转码\n")
+		return
+	}
+
+	// 获取URL中的字幕轨道和音频轨道参数
+	subtitleTrackIndex := ms.parseTrackIndex(r.URL.Query().Get("subtitle"), "字幕")
+	audioTrackIndex := ms.parseTrackIndex(r.URL.Query().Get("audio"), "音频")
+
+	// 转码文件
+	transcodedFile, err := ms.transcoder.TranscodeToMp4(filePath, subtitleTrackIndex, audioTrackIndex)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("转码失败: %v", err), http.StatusInternalServerError)
+		log.Printf("转码失败: %v\n", err)
+		return
+	}
+
+	// 高效提供转码后的文件
+	ms.serveFileEfficiently(w, r, transcodedFile)
+}
+
+// parseTrackIndex 解析轨道索引参数
+func (ms *MediaServer) parseTrackIndex(param string, trackType string) int {
+	if param == "" {
+		return -1
+	}
+
+	index, err := strconv.Atoi(param)
+	if err != nil {
+		log.Printf("无效的%s轨道索引: %s, 使用默认值(-1)", trackType, param)
+		return -1
+	}
+
+	return index
 }
 
 // serveFileEfficiently 高效地提供文件服务，支持范围请求和缓冲传输
@@ -276,6 +303,12 @@ func (ms *MediaServer) serveFileEfficiently(w http.ResponseWriter, req *http.Req
 		return
 	}
 
+	// 处理范围请求
+	ms.handleRangeRequest(w, req, file, fileSize)
+}
+
+// handleRangeRequest 处理HTTP范围请求
+func (ms *MediaServer) handleRangeRequest(w http.ResponseWriter, req *http.Request, file *os.File, fileSize int64) {
 	// 设置接受范围头
 	w.Header().Set("Accept-Ranges", "bytes")
 
@@ -283,8 +316,8 @@ func (ms *MediaServer) serveFileEfficiently(w http.ResponseWriter, req *http.Req
 	start := int64(0)
 	end := int64(fileSize - 1)
 
-	// 解析范围请求（简化版）	// 格式通常为 "bytes=start-end"
-	// 这里使用简化的解析方式
+	// 解析范围请求
+	rangeHeader := req.Header.Get("Range")
 	if len(rangeHeader) > 6 && rangeHeader[:6] == "bytes=" {
 		parts := strings.Split(rangeHeader[6:], "-")
 		if len(parts) > 0 && parts[0] != "" {
@@ -320,7 +353,7 @@ func (ms *MediaServer) serveFileEfficiently(w http.ResponseWriter, req *http.Req
 	reader := io.NewSectionReader(file, start, length)
 
 	// 使用缓冲区提高传输效率
-	buffer := make([]byte, 32*1024) // 32KB 缓冲区
+	buffer := make([]byte, defaultBufferSize)
 	io.CopyBuffer(w, reader, buffer)
 }
 
