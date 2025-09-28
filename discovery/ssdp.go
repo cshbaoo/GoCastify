@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/koron/go-ssdp"
@@ -36,19 +37,164 @@ func SearchDevices(timeout time.Duration) ([]DeviceInfo, error) {
 }
 
 // SearchDevicesWithContext 支持取消的设备搜索函数
+func SearchDevicesWithContext(ctx context.Context, timeout time.Duration) ([]DeviceInfo, error) {
+	// 创建一个带超时的上下文
+	searchCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	// 存储所有搜索到的设备，使用UDN作为键进行去重
+	allDevices := make(map[string]DeviceInfo)
+	// 用于跟踪已经尝试获取详细信息的Location URL
+	processedLocations := make(map[string]bool)
+
+	// 定义要搜索的多种设备类型，增加发现成功率
+	deviceTypes := []string{
+		"ssdp:all", // 搜索所有SSDP设备
+		"urn:schemas-upnp-org:device:MediaRenderer:1", // 标准媒体渲染器
+		"urn:schemas-upnp-org:device:MediaRenderer:2", // 较新的媒体渲染器版本
+	}
+
+	// 使用WaitGroup等待所有搜索和处理完成
+	var wg sync.WaitGroup
+	var resultMutex sync.Mutex
+
+	// 对每种设备类型进行搜索
+	for _, deviceType := range deviceTypes {
+		// 检查是否已取消
+		if searchCtx.Err() != nil {
+			log.Printf("搜索上下文已取消(%v)，但继续收集已找到的设备", searchCtx.Err())
+			// 不立即返回，而是继续处理已找到的设备
+			break
+		}
+
+		wg.Add(1)
+		go func(deviceType string) {
+			defer wg.Done()
+			
+			log.Printf("开始搜索设备类型: %s，超时时间: %v\n", deviceType, timeout/2)
+
+			// 执行搜索
+			results, err := ssdp.Search(deviceType, int((timeout/2).Seconds()), "")
+			if err != nil {
+				log.Printf("搜索设备类型 %s 失败: %v\n", deviceType, err)
+				return
+			}
+
+			// 处理每个搜索结果
+			for _, res := range results {
+				// 检查是否已取消
+				if searchCtx.Err() != nil {
+					break
+				}
+
+				// 避免重复处理同一Location
+				resultMutex.Lock()
+				if processedLocations[res.Location] {
+					resultMutex.Unlock()
+					continue
+				}
+				processedLocations[res.Location] = true
+				resultMutex.Unlock()
+
+				wg.Add(1)
+				go func(res ssdp.Service) {
+					defer wg.Done()
+
+					// 创建一个带超时的上下文用于单个设备详情请求
+					detailCtx, cancelDetail := context.WithTimeout(searchCtx, 3*time.Second)
+					defer cancelDetail()
+
+					// 获取设备详情
+					detail, err := getDeviceDetailsWithContext(detailCtx, res.Location)
+					if err != nil {
+						// 忽略单个设备的错误，继续处理其他设备
+						log.Printf("获取设备详情失败: %v\n", err)
+						return
+					}
+
+					// 创建设备信息
+					device := DeviceInfo{
+						USN:         res.USN,
+						Location:    res.Location,
+						Server:      res.Server,
+						FriendlyName: detail.Device.FriendlyName,
+						UDN:         detail.Device.UDN,
+					}
+
+					// 使用UDN作为键进行去重
+					resultMutex.Lock()
+					allDevices[device.UDN] = device
+					resultMutex.Unlock()
+				}(res)
+			}
+		}(deviceType)
+	}
+
+	// 等待所有goroutine完成
+	doneChan := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(doneChan)
+	}()
+
+	// 等待所有处理完成或上下文取消
+	select {
+	case <-doneChan:
+		// 将map转换为slice
+		devices := make([]DeviceInfo, 0, len(allDevices))
+		for _, device := range allDevices {
+			devices = append(devices, device)
+		}
+		return devices, nil
+	case <-searchCtx.Done():
+		// 如果超时或取消，返回已找到的设备
+		devices := make([]DeviceInfo, 0, len(allDevices))
+		for _, device := range allDevices {
+			devices = append(devices, device)
+		}
+		// 如果已经找到了设备，就返回这些设备而不是错误
+		if len(devices) > 0 {
+			return devices, nil
+		}
+		return nil, searchCtx.Err()
+	}
+}
+
 // getDeviceDetails 从设备的Location URL获取详细信息
 func getDeviceDetails(location string) (*deviceXML, error) {
-	// 设置HTTP请求的超时时间
-	client := http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get(location)
+	// 创建默认上下文
+	ctx := context.Background()
+	return getDeviceDetailsWithContext(ctx, location)
+}
+
+// getDeviceDetailsWithContext 使用带上下文的HTTP请求获取设备详细信息
+func getDeviceDetailsWithContext(ctx context.Context, location string) (*deviceXML, error) {
+	log.Printf("正在获取设备详情: %s\n", location)
+	
+	// 创建HTTP请求
+	req, err := http.NewRequestWithContext(ctx, "GET", location, nil)
 	if err != nil {
+		log.Printf("创建HTTP请求失败: %v\n", err)
+		return nil, err
+	}
+
+	// 设置HTTP请求的超时时间
+	client := http.Client{
+		Timeout: 3 * time.Second, // 明确设置超时时间
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("HTTP请求失败: %v\n", err)
 		return nil, err
 	}
 	defer resp.Body.Close()
 
+	log.Printf("获取设备详情成功，状态码: %d\n", resp.StatusCode)
+	
 	// 读取响应体
 	data, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
+		log.Printf("读取响应体失败: %v\n", err)
 		return nil, err
 	}
 
@@ -56,156 +202,18 @@ func getDeviceDetails(location string) (*deviceXML, error) {
 	var deviceXML deviceXML
 	err = xml.Unmarshal(data, &deviceXML)
 	if err != nil {
+		log.Printf("解析XML失败: %v\n\n响应数据预览: %s...\n", err, string(data[:min(200, len(data))]))
 		return nil, err
 	}
 
+	log.Printf("成功解析设备详情: 设备名称='%s', UDN='%s'\n", deviceXML.Device.FriendlyName, deviceXML.Device.UDN)
 	return &deviceXML, nil
 }
 
-func SearchDevicesWithContext(ctx context.Context, timeout time.Duration) ([]DeviceInfo, error) {
-	// 创建一个带超时的上下文
-	searchCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
-	// 在单独的goroutine中执行搜索并处理结果
-	resultsChan := make(chan []DeviceInfo, 1)
-	errChan := make(chan error, 1)
-
-	go func() {
-		// 存储所有搜索到的设备，使用UDN作为键进行去重
-		allDevices := make(map[string]DeviceInfo)
-		// 用于跟踪已经尝试获取详细信息的Location URL
-		processedLocations := make(map[string]bool)
-
-		// 定义要搜索的多种设备类型，增加发现成功率
-		deviceTypes := []string{
-			"urn:schemas-upnp-org:device:MediaRenderer:1", // 标准媒体渲染器
-			"urn:schemas-upnp-org:device:MediaRenderer:2", // 较新的媒体渲染器版本
-			"ssdp:all", // 搜索所有SSDP设备
-		}
-
-		// 对每种设备类型进行搜索
-		for _, deviceType := range deviceTypes {
-			// 检查是否已取消
-			if searchCtx.Err() != nil {
-				log.Printf("搜索上下文已取消(%v)，但继续收集已找到的设备", searchCtx.Err())
-				// 不立即返回，而是继续处理已找到的设备
-				break
-			}
-
-			log.Printf("开始搜索设备类型: %s，超时时间: %v\n", deviceType, timeout/2)
-
-			// 执行搜索
-			results, err := ssdp.Search(deviceType, int((timeout/2).Seconds()), "")
-			if err != nil {
-				log.Printf("搜索设备类型 %s 失败: %v\n", deviceType, err)
-				// 继续搜索下一种类型，不立即返回错误
-				continue
-			}
-
-			log.Printf("搜索设备类型 %s 完成，收到 %d 个响应\n", deviceType, len(results))
-
-			// 处理搜索结果
-			for _, r := range results {
-				// 检查是否已取消，但即使取消也继续处理已收到的结果
-				if searchCtx.Err() != nil {
-					log.Printf("搜索上下文已取消(%v)，但继续处理当前结果", searchCtx.Err())
-				}
-
-				// 处理设备信息，尝试从Location获取详细信息
-				tdevice := DeviceInfo{
-					USN:      r.USN,
-					Location: r.Location,
-					Server:   r.Server,
-				}
-
-				// 尝试从Location URL获取设备详细信息
-				// 只对每个Location URL处理一次，避免重复请求
-				if !processedLocations[r.Location] {
-					processedLocations[r.Location] = true
-					deviceDetails, err := getDeviceDetails(r.Location)
-					if err == nil && deviceDetails != nil {
-						// 成功获取到详细信息
-						udn := deviceDetails.Device.UDN
-						friendlyName := deviceDetails.Device.FriendlyName
-						
-						// 如果获取到了UDN，使用UDN作为去重键
-						if udn != "" {
-							tdevice.UDN = udn
-							// 检查是否已存在该UDN的设备
-							if _, exists := allDevices[udn]; exists {
-								// 设备已存在，不重复添加
-								continue
-							}
-						} else {
-							// 没有UDN，使用USN作为备选
-							udn = r.USN
-							if _, exists := allDevices[udn]; exists {
-								continue
-							}
-							}
-
-						// 如果获取到了FriendlyName，使用它
-						if friendlyName != "" {
-							tdevice.FriendlyName = friendlyName
-						} else {
-							// 没有获取到FriendlyName，使用Server作为备选
-							tdevice.FriendlyName = r.Server
-						}
-
-						// 添加到结果集
-						allDevices[udn] = tdevice
-						log.Printf("发现设备: %s, UDN: %s, Location: %s\n", tdevice.FriendlyName, tdevice.UDN, tdevice.Location)
-					} else {
-						// 无法获取详细信息，使用基本信息并以USN为键
-						tdevice.FriendlyName = r.Server
-						if _, exists := allDevices[r.USN]; !exists {
-							allDevices[r.USN] = tdevice
-							log.Printf("无法获取设备详情，使用基本信息: %s, USN: %s\n", tdevice.FriendlyName, tdevice.USN)
-						}
-					}
-				} else {
-					// 此Location已经处理过，跳过
-					log.Printf("Location已处理，跳过: %s\n", r.Location)
-				}
-			}
-		}
-
-		// 将map转换为slice
-		devices := make([]DeviceInfo, 0, len(allDevices))
-		for _, device := range allDevices {
-			devices = append(devices, device)
-		}
-
-		log.Printf("所有搜索完成，共发现 %d 个唯一设备，准备返回结果\n", len(devices))
-
-		// 添加详细的设备信息日志
-		for i, device := range devices {
-			log.Printf("设备 %d: USN=%s, FriendlyName=%s, Location=%s\n", i+1, device.USN, device.FriendlyName, device.Location)
-		}
-
-		// 返回找到的设备，无论上下文是否已取消
-		resultsChan <- devices
-	}()
-
-	// 等待搜索结果或取消信号
-	select {
-	case <-searchCtx.Done():
-		// 上下文已取消或超时，但我们仍然等待goroutine完成并返回已找到的设备
-		log.Printf("主搜索上下文已完成(%v)，等待收集已找到的设备\n", searchCtx.Err())
-		// 直接等待goroutine完成，不再设置1秒超时
-		// 因为我们已经确保goroutine会发送结果，无论上下文是否取消
-		select {
-		case devices := <-resultsChan:
-			// 即使超时，也返回已找到的设备
-			log.Printf("返回收集到的 %d 个设备\n", len(devices))
-			return devices, nil
-		}
-	case err := <-errChan:
-		// 发生错误
-		return nil, err
-	case devices := <-resultsChan:
-		// 搜索完成，返回结果
-		return devices, nil
+// min 返回两个整数中的较小值
+func min(a, b int) int {
+	if a < b {
+		return a
 	}
+	return b
 }

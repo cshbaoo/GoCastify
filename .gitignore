@@ -8,7 +8,10 @@
 *.dylib
 
 # 可执行文件
+/GoCastify
 /go2tv
+/bin/
+/dist/
 
 # 临时文件
 *.tmp

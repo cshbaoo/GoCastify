@@ -12,10 +12,10 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
-	"go2tv/discovery"
-	"go2tv/dlna"
-	"go2tv/server"
-	"go2tv/transcoder"
+	"GoCastify/discovery"
+	"GoCastify/dlna"
+	"GoCastify/server"
+	"GoCastify/transcoder"
 )
 
 // SubtitleTrack 表示媒体文件中的字幕轨道信息
@@ -124,14 +124,12 @@ func (app *App) StartCasting(progress *dialog.ProgressDialog) {
 		mediaURL += "?subtitle=" + strconv.Itoa(app.SelectedSubtitleIndex)
 		// 如果同时选择了音频轨道，添加音频参数
 		if app.SelectedAudioIndex >= 0 {
-			// 注意：这里使用的是音频轨道在音频流中的相对索引（从0开始），而不是原始索引
-			// 在FFmpeg中，-map "0:a:0" 表示第一个音频流的第一个轨道
-			mediaURL += "&audio=" + strconv.Itoa(0)
+			// 使用实际选择的音频轨道索引
+			mediaURL += "&audio=" + strconv.Itoa(app.SelectedAudioIndex)
 		}
 	} else if app.SelectedAudioIndex >= 0 {
 		// 只有音频轨道参数
-		// 同样使用相对索引
-		mediaURL += "?audio=" + strconv.Itoa(0)
+		mediaURL += "?audio=" + strconv.Itoa(app.SelectedAudioIndex)
 	}
 	log.Printf("媒体文件URL: %s\n", mediaURL)
 

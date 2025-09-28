@@ -13,9 +13,9 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
-	"go2tv/app"
-	"go2tv/discovery"
-	"go2tv/transcoder"
+	"GoCastify/app"
+	"GoCastify/discovery"
+	"GoCastify/transcoder"
 )
 
 // BuildUI 构建应用程序的用户界面 - 按照苹果Human Interface Guidelines设计

@@ -5,8 +5,8 @@ import (
 
 	"fyne.io/fyne/v2"
 	fyneapp "fyne.io/fyne/v2/app"
-	"go2tv/app"
-	"go2tv/ui"
+	"GoCastify/app"
+	"GoCastify/ui"
 )
 
 func main() {

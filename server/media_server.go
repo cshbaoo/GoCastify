@@ -3,16 +3,18 @@ package server
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
-	"go2tv/transcoder"
+	"GoCastify/transcoder"
 )
 
 // MediaServer 提供媒体文件的HTTP服务器
@@ -97,9 +99,9 @@ func (ms *MediaServer) Start(mediaPath string) (string, error) {
 			return
 		}
 
-		// 如果不需要转码，直接提供文件
+		// 如果不需要转码，高效提供文件
 		if !needTranscode {
-			http.ServeFile(w, r, filePath)
+			ms.serveFileEfficiently(w, r, filePath)
 			return
 		}
 
@@ -149,14 +151,17 @@ func (ms *MediaServer) Start(mediaPath string) (string, error) {
 			return
 		}
 
-		// 提供转码后的文件
-		http.ServeFile(w, r, transcodedFile)
+		// 高效提供转码后的文件
+			ms.serveFileEfficiently(w, r, transcodedFile)
 	})
 
 	// 创建HTTP服务器
 	ms.httpServer = &http.Server{
-		Addr:    fmt.Sprintf(":%d", ms.port),
-		Handler: handler,
+		Addr:         fmt.Sprintf(":%d", ms.port),
+		Handler:      handler,
+		ReadTimeout:  30 * time.Second,  // 增加读取超时
+		WriteTimeout: 30 * time.Second,  // 增加写入超时
+		IdleTimeout:  120 * time.Second, // 增加空闲超时
 	}
 
 	// 在后台启动服务器
@@ -218,6 +223,105 @@ func (ms *MediaServer) GetServerURL() string {
 	}
 
 	return fmt.Sprintf("http://%s:%d", ip, ms.port)
+}
+
+// serveFileEfficiently 高效地提供文件服务，支持范围请求和缓冲传输
+func (ms *MediaServer) serveFileEfficiently(w http.ResponseWriter, req *http.Request, filePath string) {
+	// 检查文件是否存在
+	fileInfo, err := os.Stat(filePath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("文件不存在: %v", err), http.StatusNotFound)
+		return
+	}
+
+	// 打开文件
+	file, err := os.Open(filePath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("无法打开文件: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer file.Close()
+
+	// 设置内容类型
+	contentType := "application/octet-stream"
+	ext := strings.ToLower(filepath.Ext(filePath))
+	supportedMimeTypes := map[string]string{
+		".mp4":  "video/mp4",
+		".mkv":  "video/x-matroska",
+		".avi":  "video/x-msvideo",
+		".mov":  "video/quicktime",
+		".mp3":  "audio/mpeg",
+		".aac":  "audio/aac",
+		".flac": "audio/flac",
+		".jpg":  "image/jpeg",
+		".jpeg": "image/jpeg",
+		".png":  "image/png",
+	}
+	if mimeType, exists := supportedMimeTypes[ext]; exists {
+		contentType = mimeType
+	}
+	w.Header().Set("Content-Type", contentType)
+
+	// 文件大小
+	fileSize := fileInfo.Size()
+
+	// 支持范围请求
+	rangeHeader := req.Header.Get("Range")
+
+	// 如果没有范围请求，使用http.ServeContent提供文件
+	if rangeHeader == "" {
+		w.Header().Set("Content-Length", strconv.FormatInt(fileSize, 10))
+		w.Header().Set("Accept-Ranges", "bytes")
+		http.ServeContent(w, req, fileInfo.Name(), fileInfo.ModTime(), file)
+		return
+	}
+
+	// 设置接受范围头
+	w.Header().Set("Accept-Ranges", "bytes")
+
+	// 简单的范围请求处理逻辑
+	start := int64(0)
+	end := int64(fileSize - 1)
+
+	// 解析范围请求（简化版）	// 格式通常为 "bytes=start-end"
+	// 这里使用简化的解析方式
+	if len(rangeHeader) > 6 && rangeHeader[:6] == "bytes=" {
+		parts := strings.Split(rangeHeader[6:], "-")
+		if len(parts) > 0 && parts[0] != "" {
+			if s, err := strconv.ParseInt(parts[0], 10, 64); err == nil {
+				start = s
+			}
+		}
+		if len(parts) > 1 && parts[1] != "" {
+			if e, err := strconv.ParseInt(parts[1], 10, 64); err == nil {
+				end = e
+			}
+		}
+	}
+
+	// 验证范围
+	if start < 0 || start >= fileSize {
+		http.Error(w, "无效的范围请求", http.StatusRequestedRangeNotSatisfiable)
+		return
+	}
+	if end < start || end >= fileSize {
+		end = fileSize - 1
+	}
+
+	// 计算要读取的字节数
+	length := end - start + 1
+
+	// 设置部分内容响应头
+	w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, end, fileSize))
+	w.Header().Set("Content-Length", strconv.FormatInt(length, 10))
+	w.WriteHeader(http.StatusPartialContent)
+
+	// 创建有限的读取器
+	reader := io.NewSectionReader(file, start, length)
+
+	// 使用缓冲区提高传输效率
+	buffer := make([]byte, 32*1024) // 32KB 缓冲区
+	io.CopyBuffer(w, reader, buffer)
 }
 
 // getLocalIP 获取本地IP地址

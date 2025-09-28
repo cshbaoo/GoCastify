@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -18,6 +19,8 @@ type Transcoder struct {
 	// 缓存转码结果以提高性能
 	transcodingCache map[string]string
 	cacheMutex       sync.Mutex
+	// 缓存过期时间
+	cacheExpiry map[string]time.Time
 	// 临时文件存储
 	tempDir string
 	// 字幕轨道信息缓存
@@ -26,6 +29,9 @@ type Transcoder struct {
 	// 音频轨道信息缓存
 	audioTracks map[string][]AudioTrack
 	audioMutex  sync.Mutex
+	// 限制并发转码任务数量
+	maxConcurrentTranscodes int
+	semaphore              chan struct{}
 }
 
 // SubtitleTrack 表示媒体文件中的字幕轨道信息
@@ -43,7 +49,9 @@ type AudioTrack struct {
 	Title     string
 	CodecName string
 	IsDefault bool
-}// NewTranscoder 创建一个新的转码器
+}
+
+// NewTranscoder 创建一个新的转码器
 func NewTranscoder() (*Transcoder, error) {
 	// 创建临时目录
 	tempDir, err := os.MkdirTemp("", "go2tv_transcode_")
@@ -51,16 +59,26 @@ func NewTranscoder() (*Transcoder, error) {
 		return nil, fmt.Errorf("创建临时目录失败: %w", err)
 	}
 
+	// 获取CPU核心数，设置最大并发转码任务数
+	cpuCount := runtime.NumCPU()
+	maxConcurrentTranscodes := cpuCount / 2
+	if maxConcurrentTranscodes < 1 {
+		maxConcurrentTranscodes = 1
+	}
+
 	return &Transcoder{
-		transcodingCache: make(map[string]string),
-		cacheMutex:       sync.Mutex{},
-		tempDir:          tempDir,
-		subtitleTracks:   make(map[string][]SubtitleTrack),
-		subtitleMutex:    sync.Mutex{},
-		audioTracks:      make(map[string][]AudioTrack),
-		audioMutex:       sync.Mutex{},
+		transcodingCache:        make(map[string]string),
+		cacheMutex:              sync.Mutex{},
+		cacheExpiry:             make(map[string]time.Time),
+		tempDir:                 tempDir,
+		subtitleTracks:          make(map[string][]SubtitleTrack),
+		subtitleMutex:           sync.Mutex{},
+		audioTracks:             make(map[string][]AudioTrack),
+		audioMutex:              sync.Mutex{},
+		maxConcurrentTranscodes: maxConcurrentTranscodes,
+		semaphore:               make(chan struct{}, maxConcurrentTranscodes),
 	},
-		 nil
+		nil
 }
 
 // 支持的可转码格式
@@ -307,25 +325,20 @@ func (t *Transcoder) TranscodeToMp4(inputFile string, subtitleTrackIndex int, au
 	cacheKey := fmt.Sprintf("%s_subtitle_%d_audio_%d", inputFile, subtitleTrackIndex, audioTrackIndex)
 
 	// 检查是否已有缓存的转码结果
-	t.cacheMutex.Lock()
-	cachedOutput, exists := t.transcodingCache[cacheKey]
-	t.cacheMutex.Unlock()
-
-	if exists {
-		// 检查缓存文件是否存在
-		if _, err := os.Stat(cachedOutput); err == nil {
-			log.Printf("使用缓存的转码结果: %s", cachedOutput)
-			return cachedOutput, nil
-		}
-		// 缓存文件不存在，移除缓存记录
-		t.cacheMutex.Lock()
-		delete(t.transcodingCache, cacheKey)
-			t.cacheMutex.Unlock()
+	if outputFile, valid := t.getCachedOutput(cacheKey); valid {
+		log.Printf("使用缓存的转码结果: %s", outputFile)
+		return outputFile, nil
 	}
 
 	if !CheckFFmpeg() {
 		return "", fmt.Errorf("未找到FFmpeg，请先安装FFmpeg")
 	}
+
+	// 限制并发转码任务数量
+	t.semaphore <- struct{}{}
+	defer func() {
+		<-t.semaphore
+	}()
 
 	// 创建输出文件路径
 	baseName := strings.TrimSuffix(filepath.Base(inputFile), filepath.Ext(inputFile))
@@ -344,47 +357,8 @@ func (t *Transcoder) TranscodeToMp4(inputFile string, subtitleTrackIndex int, au
 		return "", fmt.Errorf("获取媒体信息失败: %w", err)
 	}
 
-	// 构建FFmpeg转码参数
-	// 基本参数：高质量、快速启动（适合流式传输）
-	args := []string{
-		"-i", inputFile,
-		"-c:v", "h264", // 使用H.264视频编码
-		"-preset", "ultrafast", // 最快的编码速度
-		"-crf", "28", // 较低的质量但更快的编码（可根据需要调整）
-		"-profile:v", "main", // 兼容性更好的配置
-		"-level", "4.0",
-		"-movflags", "+faststart", // 快速启动，适合流式传输
-	}
-
-	// 构建映射参数
-	args = append(args, "-map", "0:v:0") // 视频流
-
-	// 如果指定了音频轨道，使用指定的轨道
-	if audioTrackIndex >= 0 {
-		args = append(args, "-map", fmt.Sprintf("0:a:%d", audioTrackIndex)) // 选择的音频轨道
-	} else {
-		args = append(args, "-map", "0:a?")  // 所有音频流（如果有）
-	}
-
-	// 如果指定了字幕轨道，添加字幕处理参数
-	if subtitleTrackIndex >= 0 {
-		args = append(args, "-map", fmt.Sprintf("0:s:%d", subtitleTrackIndex)) // 选择的字幕轨道
-		args = append(args, "-c:s", "mov_text") // 转换字幕为MP4兼容格式
-		args = append(args, "-disposition:s:0", "default") // 设置为默认字幕
-	}
-
-	// 检查是否需要转码音频
-	audioCodec, audioExists := mediaInfo["audio_codec"]
-	if audioExists && needTranscodeAudioFormats[strings.ToLower(audioCodec)] {
-		// 转码为更通用的AAC格式
-		args = append(args, "-c:a", "aac", "-b:a", "128k")
-	} else {
-		// 复制音频流，节省资源
-		args = append(args, "-c:a", "copy")
-	}
-
-	// 添加输出文件
-	args = append(args, outputFile)
+	// 构建FFmpeg转码参数，优化性能
+	args := t.buildOptimizedTranscodeArgs(inputFile, outputFile, mediaInfo, subtitleTrackIndex, audioTrackIndex)
 
 	// 记录转码开始时间
 	startTime := time.Now()
@@ -444,9 +418,10 @@ func (t *Transcoder) TranscodeToMp4(inputFile string, subtitleTrackIndex int, au
 	duration := time.Since(startTime)
 	log.Printf("转码完成，耗时: %v", duration)
 
-	// 缓存转码结果
+	// 缓存转码结果，设置24小时过期
 	t.cacheMutex.Lock()
 	t.transcodingCache[cacheKey] = outputFile
+	t.cacheExpiry[cacheKey] = time.Now().Add(24 * time.Hour)
 	t.cacheMutex.Unlock()
 
 	return outputFile, nil
@@ -483,8 +458,12 @@ func (t *Transcoder) Cleanup() error {
 	t.cacheMutex.Lock()
 	defer t.cacheMutex.Unlock()
 
+	// 清理过期缓存
+	t.cleanupExpiredCache()
+
 	// 清理缓存记录
 	t.transcodingCache = make(map[string]string)
+	t.cacheExpiry = make(map[string]time.Time)
 
 	// 清理临时目录
 	if t.tempDir != "" {
@@ -495,6 +474,104 @@ func (t *Transcoder) Cleanup() error {
 	}
 
 	return nil
+}
+
+// 内部方法: 获取缓存的输出文件路径，如果缓存有效返回路径和true
+func (t *Transcoder) getCachedOutput(cacheKey string) (string, bool) {
+	t.cacheMutex.Lock()
+	defer t.cacheMutex.Unlock()
+
+	// 先清理过期缓存
+	t.cleanupExpiredCache()
+
+	// 检查是否有缓存
+	cachedOutput, exists := t.transcodingCache[cacheKey]
+	if !exists {
+		return "", false
+	}
+
+	// 检查缓存文件是否存在
+	if _, err := os.Stat(cachedOutput); err != nil {
+		// 缓存文件不存在，移除缓存记录
+		delete(t.transcodingCache, cacheKey)
+		delete(t.cacheExpiry, cacheKey)
+		return "", false
+	}
+
+	return cachedOutput, true
+}
+
+// 内部方法: 清理过期的缓存
+func (t *Transcoder) cleanupExpiredCache() {
+	now := time.Now()
+	expiredKeys := []string{}
+
+	// 找出所有过期的缓存键
+	for key, expiry := range t.cacheExpiry {
+		if now.After(expiry) {
+			expiredKeys = append(expiredKeys, key)
+		}
+	}
+
+	// 删除过期的缓存文件和记录
+	for _, key := range expiredKeys {
+		if filePath, exists := t.transcodingCache[key]; exists {
+			// 尝试删除文件，但不处理错误
+			os.Remove(filePath)
+			// 移除缓存记录
+			delete(t.transcodingCache, key)
+		}
+		delete(t.cacheExpiry, key)
+	}
+}
+
+// 内部方法: 构建优化的转码参数
+func (t *Transcoder) buildOptimizedTranscodeArgs(inputFile, outputFile string, mediaInfo map[string]string, subtitleTrackIndex, audioTrackIndex int) []string {
+	// 基本参数：高质量、快速启动（适合流式传输）
+	args := []string{
+		"-i", inputFile,
+		"-c:v", "h264", // 使用H.264视频编码
+		"-preset", "ultrafast", // 最快的编码速度
+		"-crf", "28", // 较低的质量但更快的编码
+		"-profile:v", "main", // 兼容性更好的配置
+		"-level", "4.0",
+		"-movflags", "+faststart", // 快速启动，适合流式传输
+		"-threads", strconv.Itoa(runtime.NumCPU()), // 使用多核加速
+		"-hide_banner", // 减少输出信息
+		"-loglevel", "warning", // 只显示警告和错误
+	}
+
+	// 构建映射参数
+	args = append(args, "-map", "0:v:0") // 视频流
+
+	// 如果指定了音频轨道，使用指定的轨道
+	if audioTrackIndex >= 0 {
+		args = append(args, "-map", fmt.Sprintf("0:a:%d", audioTrackIndex)) // 选择的音频轨道
+	} else {
+		args = append(args, "-map", "0:a?")  // 所有音频流（如果有）
+	}
+
+	// 如果指定了字幕轨道，添加字幕处理参数
+	if subtitleTrackIndex >= 0 {
+		args = append(args, "-map", fmt.Sprintf("0:s:%d", subtitleTrackIndex)) // 选择的字幕轨道
+		args = append(args, "-c:s", "mov_text") // 转换字幕为MP4兼容格式
+		args = append(args, "-disposition:s:0", "default") // 设置为默认字幕
+	}
+
+	// 检查是否需要转码音频
+	audioCodec, audioExists := mediaInfo["audio_codec"]
+	if audioExists && needTranscodeAudioFormats[strings.ToLower(audioCodec)] {
+		// 转码为更通用的AAC格式
+		args = append(args, "-c:a", "aac", "-b:a", "128k")
+	} else {
+		// 复制音频流，节省资源
+		args = append(args, "-c:a", "copy")
+	}
+
+	// 添加输出文件
+	args = append(args, outputFile)
+
+	return args
 }
 
 // GetTempDir 获取临时目录路径

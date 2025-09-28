@@ -1,4 +1,4 @@
-module go2tv
+module GoCastify
 
 go 1.24.2
 
