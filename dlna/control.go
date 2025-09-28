@@ -5,11 +5,14 @@ import (
 	"context"
 	"encoding/xml"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 	"strings"
 	"time"
+
+	"GoCastify/interfaces"
+	"GoCastify/types"
 )
 
 // DLNA相关常量定义
@@ -49,17 +52,12 @@ const (
 )
 
 // DeviceController 用于控制DLNA设备
+// 实现了interfaces.DLNAController接口
 type DeviceController struct {
-	ControlURL string
-	EventURL   string
-	DeviceInfo DeviceInfo
-}
-
-// DeviceInfo 存储DLNA设备信息
-type DeviceInfo struct {
-	FriendlyName string
-	Manufacturer string
-	ModelName    string
+	ControlURL      string
+	EventURL        string
+	deviceInfo      types.DeviceInfo
+	subscriptionMgr *SubscriptionManager
 }
 
 // ParseDeviceDescription 解析设备描述XML
@@ -79,7 +77,7 @@ type deviceDescription struct {
 }
 
 // NewDeviceControllerWithContext 创建一个带上下文支持的设备控制器
-func NewDeviceControllerWithContext(ctx context.Context, location string) (*DeviceController, error) {
+func NewDeviceControllerWithContext(ctx context.Context, location string) (interfaces.DLNAController, error) {
 	// 获取设备描述
 	desc, err := getDeviceDescriptionWithContext(ctx, location)
 	if err != nil {
@@ -108,19 +106,28 @@ func NewDeviceControllerWithContext(ctx context.Context, location string) (*Devi
 	controller := &DeviceController{
 		ControlURL: fullControlURL,
 		EventURL:   eventURL,
-		DeviceInfo: DeviceInfo{
+		deviceInfo: types.DeviceInfo{
 			FriendlyName: desc.Device.FriendlyName,
 			Manufacturer: desc.Device.Manufacturer,
 			ModelName:    desc.Device.ModelName,
+			Location:     location,
 		},
 	}
+
+	// 初始化订阅管理器
+	controller.subscriptionMgr = newSubscriptionManager(controller)
 
 	return controller, nil
 }
 
 // NewDeviceController 创建一个新的设备控制器
-func NewDeviceController(location string) (*DeviceController, error) {
+func NewDeviceController(location string) (interfaces.DLNAController, error) {
 	return NewDeviceControllerWithContext(context.Background(), location)
+}
+
+// GetDeviceInfo 获取设备信息
+func (dc *DeviceController) GetDeviceInfo() types.DeviceInfo {
+	return dc.deviceInfo
 }
 
 // getDeviceDescriptionWithContext 使用带上下文的HTTP请求获取设备描述
@@ -145,7 +152,7 @@ func getDeviceDescriptionWithContext(ctx context.Context, location string) (*dev
 		return nil, fmt.Errorf("获取设备描述失败，状态码: %d", resp.StatusCode)
 	}
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("读取响应体失败: %w", err)
 	}
@@ -198,12 +205,72 @@ func (dc *DeviceController) PlayMediaWithContext(ctx context.Context, mediaURL s
 	}
 
 	// 发送Play请求
-	return dc.sendSOAPRequestWithContext(ctx, "Play", playXML)
+	err = dc.sendSOAPRequestWithContext(ctx, "Play", playXML)
+	if err != nil {
+		return err
+	}
+
+	// 启动事件订阅
+	if dc.subscriptionMgr != nil {
+		dc.subscriptionMgr.startSubscription(ctx)
+	}
+
+	return nil
 }
 
-// PlayMedia 播放指定的媒体文件
+// PlayMedia 播放指定的媒体文件（兼容旧接口）
 func (dc *DeviceController) PlayMedia(mediaURL string) error {
 	return dc.PlayMediaWithContext(context.Background(), mediaURL)
+}
+
+// SubscriptionManager 管理DLNA事件订阅
+// 这是一个内部组件，负责处理设备事件通知
+type SubscriptionManager struct {
+	controller *DeviceController
+	cancelFunc context.CancelFunc
+}
+
+// newSubscriptionManager 创建一个新的订阅管理器
+func newSubscriptionManager(controller *DeviceController) *SubscriptionManager {
+	return &SubscriptionManager{
+		controller: controller,
+	}
+}
+
+// startSubscription 开始订阅设备事件
+func (sm *SubscriptionManager) startSubscription(ctx context.Context) {
+	// 如果已经有活跃的订阅，先取消
+	if sm.cancelFunc != nil {
+		sm.cancelFunc()
+	}
+
+	// 创建一个子上下文用于订阅
+	subCtx, cancel := context.WithCancel(ctx)
+	sm.cancelFunc = cancel
+
+	// 在后台启动订阅处理
+	go sm.handleSubscription(subCtx)
+}
+
+// handleSubscription 处理事件订阅
+func (sm *SubscriptionManager) handleSubscription(ctx context.Context) {
+	// 简化实现，实际项目中可能需要实现真正的UPnP事件订阅
+	// 此处我们只是定期检查上下文是否已取消
+
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	log.Printf("开始事件订阅监控: %s", sm.controller.deviceInfo.FriendlyName)
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Printf("停止事件订阅监控: %v", ctx.Err())
+			return
+		case <-ticker.C:
+			// 定期检查
+		}
+	}
 }
 
 // sendSOAPRequestWithContext 带上下文支持的SOAP请求发送函数
@@ -231,7 +298,7 @@ func (dc *DeviceController) sendSOAPRequestWithContext(ctx context.Context, acti
 	// 检查响应状态
 	if resp.StatusCode != http.StatusOK {
 		// 读取响应体以获取更多错误信息
-		respBody, _ := ioutil.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(resp.Body)
 		// 仅记录前200个字符，避免日志过长
 		respBodyPreview := string(respBody[:min(200, len(respBody))])
 		log.Printf("SOAP请求失败: %s, 状态码: %d, 响应预览: %s...\n", action, resp.StatusCode, respBodyPreview)

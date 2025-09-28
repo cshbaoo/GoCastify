@@ -1,6 +1,8 @@
 package server
 
 import (
+	"GoCastify/interfaces"
+	"GoCastify/transcoder"
 	"context"
 	"fmt"
 	"io"
@@ -13,8 +15,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"GoCastify/transcoder"
 )
 
 // 常量定义
@@ -27,27 +27,29 @@ const (
 )
 
 // MediaServer 提供媒体文件的HTTP服务器
+// 实现interfaces.MediaServer接口
 type MediaServer struct {
 	httpServer *http.Server
 	port       int
 	mediaPath  string
 	isRunning  bool
 	mu         sync.Mutex
-	transcoder *transcoder.Transcoder
+	transcoder interfaces.MediaTranscoder
 }
 
 // NewMediaServer 创建一个新的媒体服务器
-func NewMediaServer(port int) (*MediaServer, error) {
-	// 初始化转码器
-	transcoder, err := transcoder.NewTranscoder()
-	if err != nil {
-		return nil, fmt.Errorf("初始化转码器失败: %w", err)
+// 使用依赖注入模式，接受一个转码器参数
+func NewMediaServer(port int, mediaTranscoder interfaces.MediaTranscoder) *MediaServer {
+	// 如果没有提供转码器，使用默认转码器
+	if mediaTranscoder == nil {
+		defaultTranscoder, _ := transcoder.NewTranscoder()
+		mediaTranscoder = defaultTranscoder
 	}
 
 	return &MediaServer{
 		port:       port,
-		transcoder: transcoder,
-	}, nil
+		transcoder: mediaTranscoder,
+	}
 }
 
 // Start 启动媒体服务器

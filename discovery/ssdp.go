@@ -3,47 +3,44 @@ package discovery
 import (
 	"context"
 	"encoding/xml"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 	"sync"
 	"time"
 
 	"github.com/koron/go-ssdp"
+	"GoCastify/interfaces"
+	"GoCastify/types"
 )
 
-// DeviceInfo 存储发现的设备信息
-type DeviceInfo struct {
-	USN         string
-	Location    string
-	Server      string
-	FriendlyName string
-	UDN         string
+// SSDPDiscoverer 基于SSDP协议的设备发现器
+// 实现了interfaces.DeviceDiscoverer接口
+
+type SSDPDiscoverer struct {
+	devices        []types.DeviceInfo
+	devicesMutex   sync.RWMutex
 }
 
-// 用于解析设备XML描述中的设备信息
-// 简化版结构，只提取我们需要的字段
-type deviceXML struct {
-	Device struct {
-		FriendlyName string `xml:"friendlyName"`
-		UDN          string `xml:"UDN"`
-	} `xml:"device"`
+// NewSSDPDiscoverer 创建一个新的SSDP设备发现器
+func NewSSDPDiscoverer() interfaces.DeviceDiscoverer {
+	return &SSDPDiscoverer{}
 }
 
-// SearchDevices 搜索局域网中的DLNA设备
-func SearchDevices(timeout time.Duration) ([]DeviceInfo, error) {
-	// 默认使用background上下文
-	return SearchDevicesWithContext(context.Background(), timeout)
-}
+// StartSearchWithContext 开始搜索DLNA设备
+func (sd *SSDPDiscoverer) StartSearchWithContext(ctx context.Context, onDeviceFound func(types.DeviceInfo)) error {
+	// 重置设备列表
+	sd.devicesMutex.Lock()
+	sd.devices = []types.DeviceInfo{}
+	sd.devicesMutex.Unlock()
 
-// SearchDevicesWithContext 支持取消的设备搜索函数
-func SearchDevicesWithContext(ctx context.Context, timeout time.Duration) ([]DeviceInfo, error) {
 	// 创建一个带超时的上下文
+	timeout := 10 * time.Second
 	searchCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	// 存储所有搜索到的设备，使用UDN作为键进行去重
-	allDevices := make(map[string]DeviceInfo)
+	allDevices := make(map[string]types.DeviceInfo)
 	// 用于跟踪已经尝试获取详细信息的Location URL
 	processedLocations := make(map[string]bool)
 
@@ -84,17 +81,23 @@ func SearchDevicesWithContext(ctx context.Context, timeout time.Duration) ([]Dev
 		}
 
 		// 创建设备信息
-		device := DeviceInfo{
-			USN:         res.USN,
-			Location:    res.Location,
-			Server:      res.Server,
+		device := types.DeviceInfo{
 			FriendlyName: detail.Device.FriendlyName,
-			UDN:         detail.Device.UDN,
+			Location:     res.Location,
+			Manufacturer: extractManufacturerFromServer(res.Server),
+			ModelName:    extractModelFromServer(res.Server),
 		}
 
 		// 使用UDN作为键进行去重
+		udn := detail.Device.UDN
 		resultMutex.Lock()
-		allDevices[device.UDN] = device
+		if _, exists := allDevices[udn]; !exists {
+			allDevices[udn] = device
+			// 如果提供了回调函数，调用它
+			if onDeviceFound != nil {
+				onDeviceFound(device)
+			}
+		}
 		resultMutex.Unlock()
 	}
 
@@ -144,30 +147,55 @@ func SearchDevicesWithContext(ctx context.Context, timeout time.Duration) ([]Dev
 	select {
 	case <-doneChan:
 		// 将map转换为slice
-		devices := make([]DeviceInfo, 0, len(allDevices))
+		devices := make([]types.DeviceInfo, 0, len(allDevices))
 		for _, device := range allDevices {
 			devices = append(devices, device)
 		}
-		return devices, nil
+		
+		// 更新设备列表
+		sd.devicesMutex.Lock()
+		sd.devices = devices
+		sd.devicesMutex.Unlock()
+		
+		return nil
 	case <-searchCtx.Done():
 		// 如果超时或取消，返回已找到的设备
-		devices := make([]DeviceInfo, 0, len(allDevices))
+		devices := make([]types.DeviceInfo, 0, len(allDevices))
 		for _, device := range allDevices {
 			devices = append(devices, device)
 		}
-		// 如果已经找到了设备，就返回这些设备而不是错误
+		
+		// 更新设备列表
+		sd.devicesMutex.Lock()
+		sd.devices = devices
+		sd.devicesMutex.Unlock()
+		
+		// 如果已经找到了设备，就返回成功
 		if len(devices) > 0 {
-			return devices, nil
+			return nil
 		}
-		return nil, searchCtx.Err()
+		return searchCtx.Err()
 	}
 }
 
-// getDeviceDetails 从设备的Location URL获取详细信息
-func getDeviceDetails(location string) (*deviceXML, error) {
-	// 创建默认上下文
-	ctx := context.Background()
-	return getDeviceDetailsWithContext(ctx, location)
+// GetDevices 获取已发现的设备列表
+func (sd *SSDPDiscoverer) GetDevices() []types.DeviceInfo {
+	sd.devicesMutex.RLock()
+	defer sd.devicesMutex.RUnlock()
+	
+	// 返回设备列表的副本
+	devicesCopy := make([]types.DeviceInfo, len(sd.devices))
+	copy(devicesCopy, sd.devices)
+	return devicesCopy
+}
+
+// 用于解析设备XML描述中的设备信息
+// 简化版结构，只提取我们需要的字段
+type deviceXML struct {
+	Device struct {
+		FriendlyName string `xml:"friendlyName"`
+		UDN          string `xml:"UDN"`
+	} `xml:"device"`
 }
 
 // getDeviceDetailsWithContext 使用带上下文的HTTP请求获取设备详细信息
@@ -195,7 +223,7 @@ func getDeviceDetailsWithContext(ctx context.Context, location string) (*deviceX
 	log.Printf("获取设备详情成功，状态码: %d\n", resp.StatusCode)
 	
 	// 读取响应体
-	data, err := ioutil.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
 	if err != nil {
 		log.Printf("读取响应体失败: %v\n", err)
 		return nil, err
@@ -211,6 +239,18 @@ func getDeviceDetailsWithContext(ctx context.Context, location string) (*deviceX
 
 	log.Printf("成功解析设备详情: 设备名称='%s', UDN='%s'\n", deviceXML.Device.FriendlyName, deviceXML.Device.UDN)
 	return &deviceXML, nil
+}
+
+// extractManufacturerFromServer 从Server头中提取制造商信息
+func extractManufacturerFromServer(server string) string {
+	// 简化实现，实际项目中可能需要更复杂的解析逻辑
+	return "Unknown"
+}
+
+// extractModelFromServer 从Server头中提取型号信息
+func extractModelFromServer(server string) string {
+	// 简化实现，实际项目中可能需要更复杂的解析逻辑
+	return "Unknown"
 }
 
 // min 返回两个整数中的较小值

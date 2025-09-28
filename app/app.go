@@ -15,7 +15,6 @@ import (
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 
-	"GoCastify/discovery"
 	"GoCastify/dlna"
 	"GoCastify/server"
 	"GoCastify/transcoder"
@@ -31,46 +30,44 @@ const (
 
 // App 表示整个应用程序的状态和功能
 type App struct {
-	Window               fyne.Window
-	FyneApp              fyne.App
-	Devices              []discovery.DeviceInfo
-	SelectedDeviceIndex  int
-	MediaFile            string
-	MediaServer          *server.MediaServer
-	FFmpegAvailable      bool
-	SubtitleTracks       []types.SubtitleTrack
+	Window                fyne.Window
+	FyneApp               fyne.App
+	Devices               []types.DeviceInfo
+	SelectedDeviceIndex   int
+	MediaFile             string
+	MediaServer           *server.MediaServer
+	FFmpegAvailable       bool
+	SubtitleTracks        []types.SubtitleTrack
 	SelectedSubtitleIndex int
-	AudioTracks          []types.AudioTrack
-	SelectedAudioIndex   int
-	SearchCancel         context.CancelFunc
-	DeviceList           *widget.List
+	AudioTracks           []types.AudioTrack
+	SelectedAudioIndex    int
+	SearchCancel          context.CancelFunc
+	DeviceList            *widget.List
 }
 
 // NewApp 创建一个新的应用程序实例
 func NewApp(fyneApp fyne.App, window fyne.Window) (*App, error) {
+	// 创建转码器
+	transcoderInstance, _ := transcoder.NewTranscoder()
+
 	// 创建媒体服务器
-	mediaServer, err := server.NewMediaServer(defaultMediaServerPort)
-	if err != nil {
-		log.Printf("创建媒体服务器失败: %v\n", err)
-		// 继续运行，因为没有媒体服务器仍然可以提供基本功能
-		mediaServer = nil
-	}
+	mediaServer := server.NewMediaServer(defaultMediaServerPort, transcoderInstance)
 
 	// 检查FFmpeg是否可用
 	ffmpegAvailable := transcoder.CheckFFmpeg()
 
 	return &App{
-		Window:               window,
-		FyneApp:              fyneApp,
-		Devices:              []discovery.DeviceInfo{},
-		SelectedDeviceIndex:  -1,
-		MediaFile:            "",
-		MediaServer:          mediaServer,
-		FFmpegAvailable:      ffmpegAvailable,
-		SubtitleTracks:       []types.SubtitleTrack{},
+		Window:                window,
+		FyneApp:               fyneApp,
+		Devices:               []types.DeviceInfo{},
+		SelectedDeviceIndex:   -1,
+		MediaFile:             "",
+		MediaServer:           mediaServer,
+		FFmpegAvailable:       ffmpegAvailable,
+		SubtitleTracks:        []types.SubtitleTrack{},
 		SelectedSubtitleIndex: -1,
-		AudioTracks:          []types.AudioTrack{},
-		SelectedAudioIndex:   -1,
+		AudioTracks:           []types.AudioTrack{},
+		SelectedAudioIndex:    -1,
 	}, nil
 }
 
@@ -120,7 +117,10 @@ func (app *App) StartCastingWithContext(ctx context.Context, progress *dialog.Pr
 	return nil
 }
 
-// StartCasting 开始投屏操作（兼容旧接口）
+// StartCasting 开始投屏操作
+// 注意：此方法已弃用，请使用带上下文支持的StartCastingWithContext方法
+//
+// Deprecated: Use StartCastingWithContext instead for better control and cancellation
 func (app *App) StartCasting(progress *dialog.ProgressDialog) {
 	// 创建一个带有超时的上下文
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -270,7 +270,7 @@ func (app *App) SelectAudio(audioLabel *widget.Label) {
 			container.NewPadded(paddedList),
 		)
 
-			// 创建带有取消按钮的自定义对话框，符合macOS UI设计标准
+		// 创建带有取消按钮的自定义对话框，符合macOS UI设计标准
 		audioDialog := dialog.NewCustomConfirm("选择音频轨道", "确定", "取消", dialogContent, func(confirmed bool) {}, app.Window)
 		// 调整对话框大小以符合macOS设计风格
 		audioDialog.Resize(fyne.NewSize(dialogWidth, dialogHeight))
@@ -417,7 +417,7 @@ func (app *App) SelectSubtitle(subtitleLabel *widget.Label) {
 			container.NewPadded(paddedList),
 		)
 
-			// 创建带有取消按钮的自定义对话框，符合macOS UI设计标准
+		// 创建带有取消按钮的自定义对话框，符合macOS UI设计标准
 		subtitleDialog := dialog.NewCustomConfirm("选择字幕轨道", "确定", "取消", dialogContent, func(confirmed bool) {}, app.Window)
 		// 调整对话框大小以符合macOS设计风格
 		subtitleDialog.Resize(fyne.NewSize(dialogWidth, dialogHeight))
@@ -442,7 +442,7 @@ func (app *App) SelectSubtitle(subtitleLabel *widget.Label) {
 			subtitleDialog.Hide()
 		}
 
-			// 显示字幕选择对话框
+		// 显示字幕选择对话框
 		subtitleDialog.Show()
 	}()
 }
@@ -450,7 +450,7 @@ func (app *App) SelectSubtitle(subtitleLabel *widget.Label) {
 // buildMediaURL 构建媒体文件的完整URL，包括可选的字幕和音频参数
 func (app *App) buildMediaURL(serverURL, fileName string) string {
 	mediaURL := serverURL + "/" + fileName
-	
+
 	// 添加查询参数
 	params := []string{}
 	if app.SelectedSubtitleIndex >= 0 {
@@ -459,12 +459,12 @@ func (app *App) buildMediaURL(serverURL, fileName string) string {
 	if app.SelectedAudioIndex >= 0 {
 		params = append(params, "audio="+strconv.Itoa(app.SelectedAudioIndex))
 	}
-	
+
 	// 拼接查询参数
 	if len(params) > 0 {
 		mediaURL += "?" + strings.Join(params, "&")
 	}
-	
+
 	return mediaURL
 }
 

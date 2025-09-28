@@ -17,6 +17,7 @@ import (
 	app "GoCastify/app"
 	"GoCastify/discovery"
 	"GoCastify/transcoder"
+	"GoCastify/types"
 )
 
 // BuildUI 构建应用程序的用户界面 - 按照苹果Human Interface Guidelines设计
@@ -90,28 +91,36 @@ func BuildUI(app *app.App) fyne.CanvasObject {
 		// 更新状态标签
 		ffmpegStatusLabel.SetText("正在搜索DLNA设备...")
 
-		// 已经通过app.CreateSearchContext()创建了上下文和取消函数
-		// 不需要添加取消按钮，因为进度对话框会自动处理关闭
+		// 创建设备发现器实例
+		discoverer := discovery.NewSSDPDiscoverer()
+
+		// 清空当前设备列表
+		app.Devices = []types.DeviceInfo{}
+		app.DeviceList.Refresh()
 
 		// 启动goroutine搜索设备
 		go func() {
-			// 搜索设备
-			devices, err := discovery.SearchDevicesWithContext(ctx, 8*time.Second)
+			// 使用回调函数处理发现的设备
+			onDeviceFound := func(device types.DeviceInfo) {
+				// 在主线程中更新UI
+				time.AfterFunc(0, func() {
+					// 添加设备到列表
+					app.Devices = append(app.Devices, device)
+					app.DeviceList.Refresh()
+				})
+			}
+
+			// 开始搜索设备
+			err := discoverer.StartSearchWithContext(ctx, onDeviceFound)
 			if err != nil {
 				log.Printf("搜索设备失败: %v\n", err)
 			}
 
-			// 保存结果到临时变量
-			discoveredDevices := devices
-
 			// 在主线程中更新UI - 使用Fyne的线程安全机制
-			fyne.CurrentApp().SendNotification(&fyne.Notification{Title: "设备搜索完成", Content: fmt.Sprintf("找到 %d 个设备", len(discoveredDevices))})
+			fyne.CurrentApp().SendNotification(&fyne.Notification{Title: "设备搜索完成", Content: fmt.Sprintf("找到 %d 个设备", len(discoverer.GetDevices()))})
 			
 			// 使用time.AfterFunc确保UI更新在主线程中执行
 			time.AfterFunc(0, func() {
-				// 更新设备列表数据
-				app.Devices = discoveredDevices
-
 				// 隐藏进度对话框
 				progress.Hide()
 
@@ -123,7 +132,7 @@ func BuildUI(app *app.App) fyne.CanvasObject {
 				}
 
 				// 如果没有找到设备，显示提示
-				if len(discoveredDevices) == 0 {
+				if len(app.Devices) == 0 {
 					dialog.ShowInformation("未找到设备", "未找到任何DLNA设备。\n请确保您的设备已开启并连接到同一网络。", app.Window)
 				}
 
@@ -367,7 +376,7 @@ func createCard(title, description string, content fyne.CanvasObject) fyne.Canva
 }
 
 // getFriendlyDeviceName 获取设备的友好名称
-func getFriendlyDeviceName(device discovery.DeviceInfo) string {
+func getFriendlyDeviceName(device types.DeviceInfo) string {
 	if device.FriendlyName != "" {
 		return device.FriendlyName
 	}

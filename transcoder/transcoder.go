@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"GoCastify/interfaces"
 	"GoCastify/types"
 )
 
@@ -34,6 +35,9 @@ type Transcoder struct {
 	maxConcurrentTranscodes int
 	semaphore              chan struct{}
 }
+
+// 确保Transcoder实现了interfaces.MediaTranscoder接口
+var _ interfaces.MediaTranscoder = (*Transcoder)(nil)
 
 // NewTranscoder 创建一个新的转码器
 func NewTranscoder() (*Transcoder, error) {
