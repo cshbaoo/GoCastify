@@ -8,8 +8,11 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
+
+	"go2tv/transcoder"
 )
 
 // MediaServer 提供媒体文件的HTTP服务器
@@ -19,13 +22,21 @@ type MediaServer struct {
 	mediaPath  string
 	isRunning  bool
 	mu         sync.Mutex
+	transcoder *transcoder.Transcoder
 }
 
 // NewMediaServer 创建一个新的媒体服务器
-func NewMediaServer(port int) *MediaServer {
-	return &MediaServer{
-		port: port,
+func NewMediaServer(port int) (*MediaServer, error) {
+	// 初始化转码器
+	transcoder, err := transcoder.NewTranscoder()
+	if err != nil {
+		return nil, fmt.Errorf("初始化转码器失败: %w", err)
 	}
+
+	return &MediaServer{
+		port:       port,
+		transcoder: transcoder,
+	}, nil
 }
 
 // Start 启动媒体服务器
@@ -78,8 +89,68 @@ func (ms *MediaServer) Start(mediaPath string) (string, error) {
 			return
 		}
 
-		// 提供文件下载
-		http.ServeFile(w, r, filePath)
+		// 检查是否需要转码
+		supported, needTranscode := transcoder.IsSupportedFormat(filePath)
+		if !supported {
+			http.Error(w, "不支持的媒体格式", http.StatusUnsupportedMediaType)
+			log.Printf("不支持的媒体格式: %s\n", filePath)
+			return
+		}
+
+		// 如果不需要转码，直接提供文件
+		if !needTranscode {
+			http.ServeFile(w, r, filePath)
+			return
+		}
+
+		// 需要转码，检查是否启用了转码功能
+		if ms.transcoder == nil {
+			http.Error(w, "转码功能未初始化", http.StatusInternalServerError)
+			log.Printf("转码功能未初始化\n")
+			return
+		}
+
+		// 检查FFmpeg是否可用
+		if !transcoder.CheckFFmpeg() {
+			http.Error(w, "未找到FFmpeg，无法转码。请先安装FFmpeg。", http.StatusInternalServerError)
+			log.Printf("未找到FFmpeg，无法转码\n")
+			return
+		}
+
+			// 获取URL中的字幕轨道参数
+		subtitleTrackIndex := -1
+		subtitleParam := r.URL.Query().Get("subtitle")
+		if subtitleParam != "" {
+			var err error
+			subtitleTrackIndex, err = strconv.Atoi(subtitleParam)
+			if err != nil {
+				log.Printf("无效的字幕轨道索引: %s, 使用默认值(-1)", subtitleParam)
+				subtitleTrackIndex = -1
+			}
+		}
+
+		// 获取URL中的音频轨道参数
+		audioTrackIndex := -1
+		audioParam := r.URL.Query().Get("audio")
+		if audioParam != "" {
+			var err error
+			audioTrackIndex, err = strconv.Atoi(audioParam)
+			if err != nil {
+				log.Printf("无效的音频轨道索引: %s, 使用默认值(-1)", audioParam)
+				audioTrackIndex = -1
+			}
+		}
+
+		// 对于需要转码的文件，我们提供转码后的临时文件
+		transcodedFile, err := ms.transcoder.TranscodeToMp4(filePath, subtitleTrackIndex, audioTrackIndex)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("转码失败: %v", err), http.StatusInternalServerError)
+			log.Printf("转码失败: %v\n", err)
+			return
+		}
+
+		// 提供转码后的文件
+		http.ServeFile(w, r, transcodedFile)
 	})
 
 	// 创建HTTP服务器
@@ -124,6 +195,13 @@ func (ms *MediaServer) Stop() error {
 	if err != nil {
 		log.Printf("媒体服务器关闭错误: %v\n", err)
 		return err
+	}
+
+	// 清理转码器资源
+	if ms.transcoder != nil {
+		if cleanupErr := ms.transcoder.Cleanup(); cleanupErr != nil {
+			log.Printf("转码器清理错误: %v\n", cleanupErr)
+		}
 	}
 
 	ms.isRunning = false
