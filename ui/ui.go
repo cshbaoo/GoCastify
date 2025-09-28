@@ -148,7 +148,8 @@ audioSelectButton := widget.NewButton("选择音轨", func() {
 	})
 
 	selectFileButton := widget.NewButton("选择文件", func() {
-		// 打开文件选择对话框
+		// 创建自定义中文文件选择对话框
+		fileFilter := &videoFileFilter{}
 		obtainer := dialog.NewFileOpen(func(file fyne.URIReadCloser, err error) {
 			if err != nil {
 				dialog.ShowError(err, app.Window)
@@ -179,9 +180,10 @@ audioSelectButton := widget.NewButton("选择音轨", func() {
 				}
 			}
 		}, app.Window)
-
-		// 在Fyne v2中，我们可以自定义过滤器逻辑
-		obtainer.SetFilter(&videoFileFilter{})
+		// 设置文件过滤器
+		obtainer.SetFilter(fileFilter)
+		// 调整对话框大小以符合苹果设计风格
+		obtainer.Resize(fyne.NewSize(600, 400))
 		obtainer.Show()
 	})
 

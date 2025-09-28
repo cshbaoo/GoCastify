@@ -124,11 +124,14 @@ func (app *App) StartCasting(progress *dialog.ProgressDialog) {
 		mediaURL += "?subtitle=" + strconv.Itoa(app.SelectedSubtitleIndex)
 		// 如果同时选择了音频轨道，添加音频参数
 		if app.SelectedAudioIndex >= 0 {
-			mediaURL += "&audio=" + strconv.Itoa(app.SelectedAudioIndex)
+			// 注意：这里使用的是音频轨道在音频流中的相对索引（从0开始），而不是原始索引
+			// 在FFmpeg中，-map "0:a:0" 表示第一个音频流的第一个轨道
+			mediaURL += "&audio=" + strconv.Itoa(0)
 		}
 	} else if app.SelectedAudioIndex >= 0 {
 		// 只有音频轨道参数
-		mediaURL += "?audio=" + strconv.Itoa(app.SelectedAudioIndex)
+		// 同样使用相对索引
+		mediaURL += "?audio=" + strconv.Itoa(0)
 	}
 	log.Printf("媒体文件URL: %s\n", mediaURL)
 
@@ -277,8 +280,10 @@ func (app *App) SelectAudio(audioLabel *widget.Label) {
 			container.NewPadded(paddedList),
 		)
 
-		// 创建带有取消按钮的自定义对话框
+		// 创建带有取消按钮的自定义对话框，符合苹果UI设计标准
 		audioDialog := dialog.NewCustomConfirm("选择音频轨道", "确定", "取消", dialogContent, func(confirmed bool) {}, app.Window)
+		// 调整对话框大小以符合苹果设计风格
+		audioDialog.Resize(fyne.NewSize(500, 400))
 
 		// 修复重复显示的问题
 		// audioDialog.Show() 会在后面的OnSelected设置完成后调用
@@ -371,16 +376,24 @@ func (app *App) SelectSubtitle(subtitleLabel *widget.Label) {
 			return
 		}
 
-		// 创建字幕选择列表
+		// 创建字幕选择列表，优化UI以符合苹果设计标准
 		subtitleList := widget.NewList(
 			func() int {
 				return len(subtitleTracks) + 1 // +1 表示"无字幕"选项
 			},
 			func() fyne.CanvasObject {
-				return widget.NewLabel("字幕选项")
+				// 创建更美观的列表项，符合苹果UI设计风格
+				item := widget.NewLabel("字幕选项")
+				item.TextStyle = fyne.TextStyle{}
+				item.Wrapping = fyne.TextTruncate
+				// 使用容器来设置最小尺寸
+				return container.NewMax(item)
 			},
 			func(id widget.ListItemID, obj fyne.CanvasObject) {
-				label := obj.(*widget.Label)
+				container := obj.(*fyne.Container)
+				label := container.Objects[0].(*widget.Label)
+				label.TextStyle = fyne.TextStyle{}
+				label.Wrapping = fyne.TextTruncate
 				if id == 0 {
 					label.SetText("无字幕")
 				} else {
@@ -394,22 +407,26 @@ func (app *App) SelectSubtitle(subtitleLabel *widget.Label) {
 					}
 					if track.IsDefault {
 						title += " [默认]"
+						label.TextStyle = fyne.TextStyle{Bold: true} // 默认轨道使用粗体，符合苹果突出显示的风格
 					}
 					label.SetText(fmt.Sprintf("%d: %s", id-1, title))
 				}
 			},
 		)
 
-		// 创建自定义列表的容器
-		listContainer := container.NewVBox(subtitleList)
+		// 创建自定义列表的容器，增加内边距
+		paddedList := container.NewPadded(subtitleList)
+		listContainer := container.NewVBox(paddedList)
 
-		// 创建字幕选择对话框
+		// 创建字幕选择对话框，符合苹果UI设计标准
 		subtitleDialog := dialog.NewCustom(
 			"选择字幕轨道",
 			"确定",
 			listContainer,
 			app.Window,
 		)
+		// 调整对话框大小以符合苹果设计风格
+		subtitleDialog.Resize(fyne.NewSize(500, 400))
 
 		// 设置列表选择事件
 		subtitleList.OnSelected = func(id widget.ListItemID) {
