@@ -210,19 +210,21 @@ func (app *App) SelectAudio(audioLabel *widget.Label) {
 		}
 
 		// 创建音频轨道选择列表
-	audioList := widget.NewList(
+		audioList := widget.NewList(
 			func() int {
 				return len(audioTracks) + 1 // +1 表示"默认音轨"选项
 			},
 			func() fyne.CanvasObject {
-				// 创建更美观的列表项
+				// 创建更美观的列表项，符合苹果UI设计风格
 				item := widget.NewLabel("音频选项")
 				item.TextStyle = fyne.TextStyle{}
 				item.Wrapping = fyne.TextTruncate
-				return item
+				// 使用容器来设置最小尺寸
+				return container.NewMax(item)
 			},
 			func(id widget.ListItemID, obj fyne.CanvasObject) {
-				label := obj.(*widget.Label)
+				container := obj.(*fyne.Container)
+				label := container.Objects[0].(*widget.Label)
 				label.TextStyle = fyne.TextStyle{}
 				label.Wrapping = fyne.TextTruncate
 				if id == 0 {
@@ -241,30 +243,45 @@ func (app *App) SelectAudio(audioLabel *widget.Label) {
 					}
 					if track.IsDefault {
 						title += " [默认]"
-						label.TextStyle = fyne.TextStyle{Bold: true} // 默认轨道使用粗体
+						label.TextStyle = fyne.TextStyle{Bold: true} // 默认轨道使用粗体，符合苹果突出显示的风格
 					}
 					label.SetText(fmt.Sprintf("%d: %s", id-1, title))
 				}
 			},
 		)
 
-		// 创建带有内边距的容器来包裹列表
+		// 创建带有内边距的容器来包裹列表，确保内容有足够的空间
 		paddedList := container.NewPadded(
 			container.NewMax(
 				audioList,
 				// 添加占位元素来确保对话框有足够的大小
 				fyne.NewContainerWithLayout(
 					layout.NewGridLayout(1),
+					widget.NewLabelWithStyle("", fyne.TextAlignCenter, fyne.TextStyle{}), // 占位元素
+					widget.NewLabelWithStyle("", fyne.TextAlignCenter, fyne.TextStyle{}),
+					widget.NewLabelWithStyle("", fyne.TextAlignCenter, fyne.TextStyle{}),
+					widget.NewLabelWithStyle("", fyne.TextAlignCenter, fyne.TextStyle{}),
+					widget.NewLabelWithStyle("", fyne.TextAlignCenter, fyne.TextStyle{}),
 				),
 			),
 		)
 
-		// 创建说明标签
+		// 创建说明标签，符合苹果UI的清晰性原则
 		descriptionLabel := widget.NewLabel("请选择您想要使用的音频轨道：")
+		descriptionLabel.TextStyle = fyne.TextStyle{Bold: true} // 标题使用粗体
+
+		// 创建符合苹果设计规范的对话框布局
+		dialogContent := container.NewVBox(
+			container.NewPadded(descriptionLabel),
+			widget.NewSeparator(), // 分隔线增强视觉层次
+			container.NewPadded(paddedList),
+		)
 
 		// 创建带有取消按钮的自定义对话框
-		audioDialog := dialog.NewCustomConfirm("选择音频轨道", "确定", "取消", container.NewVBox(descriptionLabel, widget.NewSeparator(), paddedList), func(confirmed bool) {}, app.Window)
-		audioDialog.Show()
+		audioDialog := dialog.NewCustomConfirm("选择音频轨道", "确定", "取消", dialogContent, func(confirmed bool) {}, app.Window)
+
+		// 修复重复显示的问题
+		// audioDialog.Show() 会在后面的OnSelected设置完成后调用
 
 		// 设置列表选择事件
 		audioList.OnSelected = func(id widget.ListItemID) {

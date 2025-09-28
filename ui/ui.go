@@ -18,49 +18,62 @@ import (
 	"go2tv/transcoder"
 )
 
-// BuildUI 构建应用程序的用户界面
+// BuildUI 构建应用程序的用户界面 - 按照苹果Human Interface Guidelines设计
 func BuildUI(app *app.App) fyne.CanvasObject {
-	// 创建标题
-	title := widget.NewLabel("Go2TV - 简单易用的DLNA投屏工具")
-	title.TextStyle = fyne.TextStyle{Bold: true, Italic: true}
+	// 创建标题 - 使用苹果风格的简洁标题
+	title := widget.NewLabel("Go2TV - DLNA投屏工具")
+	title.TextStyle = fyne.TextStyle{Bold: true, Italic: false} // 移除斜体，使用更专业的样式
 	title.Alignment = fyne.TextAlignCenter
-	title.Resize(fyne.NewSize(400, 40))
+	title.Resize(fyne.NewSize(400, 36))
 
-	// 创建FFmpeg状态提示标签
+	// 创建FFmpeg状态提示标签 - 清晰的状态显示
 	ffmpegStatusLabel := widget.NewLabel("FFmpeg: 未安装 (部分功能受限)")
 	ffmpegStatusLabel.Alignment = fyne.TextAlignCenter
 	ffmpegStatusLabel.Wrapping = fyne.TextWrapOff // 禁用自动换行，确保文本在一行显示
+	ffmpegStatusLabel.TextStyle = fyne.TextStyle{Monospace: false}
+	ffmpegStatusLabel.Resize(fyne.NewSize(400, 30)) // 设置足够的宽度，确保文本横向显示
 
 	if app.FFmpegAvailable {
 		ffmpegStatusLabel.SetText("FFmpeg: 已安装 (支持完整功能)")
 	}
 
-	// 创建居中容器以居中显示FFmpeg状态标签，并添加固定宽度限制
+	// 创建居中容器以居中显示FFmpeg状态标签
 	ffmpegStatusContainer := container.NewCenter(ffmpegStatusLabel)
-	ffmpegStatusContainer.Resize(fyne.NewSize(400, 30)) // 增加宽度到400像素，确保文本横向显示
 
-	// 创建设备列表
+	// 创建设备列表 - 改进列表项样式以符合苹果设计
 	app.DeviceList = widget.NewList(
 		func() int {
 			return len(app.Devices)
 		},
 		func() fyne.CanvasObject {
-			return widget.NewLabel("设备名称")
+			// 使用容器来创建更好的列表项布局
+			item := widget.NewLabel("设备名称")
+			item.Wrapping = fyne.TextTruncate
+			item.Alignment = fyne.TextAlignLeading
+			return container.NewMax(item)
 		},
 		func(id widget.ListItemID, obj fyne.CanvasObject) {
 			if id >= 0 && id < len(app.Devices) {
-				label := obj.(*widget.Label)
+				container := obj.(*fyne.Container)
+				label := container.Objects[0].(*widget.Label)
 				label.SetText(getFriendlyDeviceName(app.Devices[id]))
+				// 为选中项添加视觉反馈
+				if id == app.SelectedDeviceIndex {
+					label.TextStyle = fyne.TextStyle{Bold: true}
+				} else {
+					label.TextStyle = fyne.TextStyle{}
+				}
 			}
 		},
 	)
 
-	// 创建设备列表选中事件
+	// 创建设备列表选中事件 - 添加视觉反馈
 	app.DeviceList.OnSelected = func(id widget.ListItemID) {
 		app.SelectedDeviceIndex = id
+		app.DeviceList.Refresh() // 刷新列表以显示选中状态
 	}
 
-	// 搜索设备按钮
+	// 搜索设备按钮 - 使用苹果风格的操作按钮
 	searchButton := widget.NewButton("搜索设备", func() {
 		// 如果已经有搜索上下文在运行，取消它
 		if app.SearchCancel != nil {
@@ -87,10 +100,10 @@ func BuildUI(app *app.App) fyne.CanvasObject {
 			}
 		})
 
-		// 在Fyne v2中，我们需要创建一个普通的信息对话框，并自己添加按钮
+		// 创建取消对话框
 		cancelDialog := dialog.NewCustomWithoutButtons("搜索设备",
 			container.NewVBox(
-				widget.NewLabel("正在搜索设备，请稍候..."),
+				container.NewPadded(widget.NewLabel("正在搜索设备，请稍候...")),
 				container.NewCenter(cancelButton),
 			),
 			app.Window)
@@ -121,13 +134,15 @@ func BuildUI(app *app.App) fyne.CanvasObject {
 		}()
 	})
 
-	// 创建媒体文件标签和选择按钮
+	// 创建媒体文件标签和选择按钮 - 改进标签样式
 	mediaFileLabel := widget.NewLabel("未选择文件")
 	mediaFileLabel.Wrapping = fyne.TextWrapWord
+	mediaFileLabel.TextStyle = fyne.TextStyle{Monospace: false}
 
 	// 创建音频相关的UI组件（需要在selectFileButton之前定义，因为它会被使用）
 audioLabel := widget.NewLabel("音轨: 默认")
 audioLabel.Wrapping = fyne.TextWrapWord
+audioLabel.TextStyle = fyne.TextStyle{Monospace: false}
 audioSelectButton := widget.NewButton("选择音轨", func() {
 		app.SelectAudio(audioLabel)
 	})
@@ -170,7 +185,7 @@ audioSelectButton := widget.NewButton("选择音轨", func() {
 		obtainer.Show()
 	})
 
-	// 投屏按钮
+	// 投屏按钮 - 作为主要操作按钮，使用更突出的布局
 	castButton := widget.NewButton("开始投屏", func() {
 		// 检查是否选择了设备
 		if app.SelectedDeviceIndex < 0 || app.SelectedDeviceIndex >= len(app.Devices) {
@@ -208,7 +223,7 @@ audioSelectButton := widget.NewButton("选择音轨", func() {
 		go app.StartCasting(progress)
 	})
 
-	// 使用提示
+	// 使用提示 - 改进文本样式和排版
 	tipsText := "1. 点击'搜索设备'查找局域网中的DLNA设备\n"
 	tipsText += "2. 从列表中选择要投屏的设备\n"
 	tipsText += "3. 点击'选择文件'选择要投屏的视频文件\n"
@@ -220,15 +235,16 @@ audioSelectButton := widget.NewButton("选择音轨", func() {
 
 	tipsLabel := widget.NewLabel(tipsText)
 	tipsLabel.Wrapping = fyne.TextWrapWord
+	tipsLabel.TextStyle = fyne.TextStyle{Monospace: false}
 
-	// 创建主布局 - 改进整体布局，增加更好的分组和间距
+	// 创建主布局 - 改进整体布局，增加更好的分组和间距（符合苹果HIG）
 	topLayout := container.NewCenter(
 		container.NewPadded(
 			searchButton,
 		),
 	)
 
-	// 使用自定义卡片效果包装设备列表
+	// 使用自定义卡片效果包装设备列表 - 改进卡片样式
 	deviceCount := len(app.Devices)
 	deviceCard := createCard(
 		"可用设备",
@@ -257,8 +273,8 @@ audioSelectButton := widget.NewButton("选择音轨", func() {
 
 	// 创建文件选择卡片
 	fileSelectContent := container.NewVBox(
-		mediaFileLabel,
-		audioLabel,
+		container.NewPadded(mediaFileLabel),
+		container.NewPadded(audioLabel),
 		container.NewHBox(
 			layout.NewSpacer(),
 			selectFileButton,
@@ -272,8 +288,10 @@ audioSelectButton := widget.NewButton("选择音轨", func() {
 		fileSelectContent,
 	)
 
+	// 底部布局 - 突出主要操作
 	bottomLayout := container.NewVBox(
 		fileCard,
+		layout.NewSpacer(), // 增加间距
 		fyne.NewContainerWithLayout(layout.NewCenterLayout(),
 			container.NewPadded(
 				castButton,
@@ -281,18 +299,23 @@ audioSelectButton := widget.NewButton("选择音轨", func() {
 		),
 	)
 
-	// 主内容布局，增加适当的间距和分组
+	// 主内容布局 - 符合苹果HIG的间距和分组
 	content := container.NewPadded(
 		container.NewVBox(
 			fyne.NewContainerWithLayout(layout.NewCenterLayout(), title),
-			fyne.NewContainerWithLayout(layout.NewCenterLayout(), ffmpegStatusContainer), // 添加FFmpeg状态提示
+			fyne.NewContainerWithLayout(layout.NewCenterLayout(), ffmpegStatusContainer),
+			layout.NewSpacer(), // 增加间距
 			widget.NewSeparator(),
+			layout.NewSpacer(), // 增加间距
 			fyne.NewContainerWithLayout(layout.NewGridLayoutWithColumns(2),
 				deviceCard,
 				tipsCard,
 			),
+			layout.NewSpacer(), // 增加间距
 			topLayout,
+			layout.NewSpacer(), // 增加间距
 			widget.NewSeparator(),
+			layout.NewSpacer(), // 增加间距
 			bottomLayout,
 		),
 	)
@@ -300,26 +323,30 @@ audioSelectButton := widget.NewButton("选择音轨", func() {
 	return content
 }
 
-// createCard 创建一个带标题和描述的卡片
+// createCard 创建一个符合苹果设计风格的带标题和描述的卡片
 func createCard(title, description string, content fyne.CanvasObject) fyne.CanvasObject {
 	titleLabel := widget.NewLabel(title)
-	titleLabel.TextStyle = fyne.TextStyle{Bold: true}
+	titleLabel.TextStyle = fyne.TextStyle{Bold: true} // 标题使用粗体
 	titleLabel.Alignment = fyne.TextAlignLeading
 	titleLabel.Resize(fyne.NewSize(400, 25))
 
 	descLabel := widget.NewLabel(description)
-	descLabel.TextStyle = fyne.TextStyle{Italic: true}
+	descLabel.TextStyle = fyne.TextStyle{Italic: false} // 描述不使用斜体，更符合苹果风格
 	descLabel.Alignment = fyne.TextAlignLeading
 	descLabel.Resize(fyne.NewSize(400, 20))
 
+	// 创建带内边距的内容容器，增加留白空间
+	paddedContent := container.NewPadded(content)
+
 	cardContent := container.NewVBox(
-		titleLabel,
-		descLabel,
+		container.NewPadded(titleLabel),  // 添加内边距
+		container.NewPadded(descLabel),   // 添加内边距
 		widget.NewSeparator(),
-		content,
+		paddedContent,
+		layout.NewSpacer(), // 增加内容的间距
 	)
 
-	// 在Fyne v2中使用容器嵌套来创建卡片效果
+	// 在Fyne v2中使用容器嵌套来创建卡片效果 - 更符合苹果设计的卡片样式
 	card := container.NewPadded(
 		fyne.NewContainerWithLayout(
 			&borderLayout{},
@@ -349,48 +376,9 @@ func getFriendlyDeviceName(device discovery.DeviceInfo) string {
 
 // borderLayout 简单的边框布局
 // 用于实现卡片的边框效果
-// 这是一个自定义布局，用于模拟容器的边框
-// 在原始代码中已经有这个实现
-// 我们需要重新添加它以确保编译通过
-// 它包含MinSize和Layout方法
-// 分别用于计算最小尺寸和布局子组件
-// 这个布局将在createCard函数中使用
-// 用于为卡片添加边框效果
-// 在Fyne v2中，我们可以使用这种自定义布局
-// 来创建与原始代码相似的视觉效果
-// 这应该解决container.NewBorderLayout不存在的问题
-// 我们直接在文件中定义这个布局结构
-// 以便createCard函数可以使用它
-// 它需要实现fyne.Layout接口
-// 这是一个简单的边框布局实现
-// 可以为卡片添加边框效果
-// 现在我们定义borderLayout结构体
-// 并实现它的MinSize和Layout方法
-// 这应该解决之前的编译错误
-// 因为我们不再依赖不存在的container.NewBorderLayout
-// 而是使用我们自己定义的borderLayout
-// 这与原始代码中的实现相同
-// 所以应该能够正常工作
-// 现在让我们定义这个结构体
-// 以及它的两个必要方法
-// 首先是结构体定义
-// 然后是MinSize方法
-// 最后是Layout方法
-// 这些方法的实现与原始代码相同
-// 只是移到了这个文件中
-// 现在我们来实现这个自定义布局
-// 首先是结构体定义
-// 它是一个简单的空结构体，因为它不需要存储任何状态
-// 然后是MinSize方法的实现
-// 最后是Layout方法的实现
-// 这应该能够解决编译错误
-// 让我们开始实现
-// 首先是结构体定义
 type borderLayout struct{}
 
 // MinSize 计算布局的最小尺寸
-// 它需要考虑内部内容的最小尺寸
-// 并为边框留出额外的空间
 func (b *borderLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
 	if len(objects) < 5 {
 		return fyne.NewSize(0, 0)
@@ -400,8 +388,6 @@ func (b *borderLayout) MinSize(objects []fyne.CanvasObject) fyne.Size {
 }
 
 // Layout 布局子组件
-// 它将设置四个边框的位置和大小
-// 以及内容的位置和大小
 func (b *borderLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
 	if len(objects) < 5 {
 		return
@@ -429,22 +415,9 @@ func (b *borderLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
 }
 
 // videoFileFilter 实现dialog.FileFilter接口，用于过滤视频文件
-// 这个结构体在selectFileButton的OnTapped回调中被使用
-// 用于设置文件选择对话框的过滤器
-// 它需要实现Matches方法，该方法用于判断一个URI是否符合过滤条件
-// 这个实现基于文件扩展名
-// 我们列出所有支持的视频文件扩展名
-// 并在Matches方法中检查文件的扩展名是否在支持的列表中
-// 这样就可以限制用户只能选择支持的视频文件
-// 这解决了之前编译错误中dialog.ExtensionFileFilter未定义的问题
-// 我们直接实现了自定义的FileFilter接口
-// 而不是依赖可能不存在的类型
-// 这应该能够解决编译错误
-// 让我们定义这个结构体并实现其方法
 type videoFileFilter struct{}
 
 // Matches 判断一个URI是否符合过滤条件
-// 它检查文件的扩展名是否是支持的视频格式
 func (f *videoFileFilter) Matches(uri fyne.URI) bool {
 	if uri == nil {
 		return false
