@@ -1,163 +1,163 @@
 # GoCastify
 
-GoCastify是一款基于Go语言开发的DLNA投屏工具，允许用户轻松将本地媒体文件（视频、音频）投射到支持DLNA的设备上，如智能电视、音响等。
+GoCastify is a DLNA casting tool developed in Go language that allows users to easily cast local media files (videos, audios) to DLNA-compatible devices such as smart TVs, speakers, etc.
 
-## 功能特性
+## Features
 
-- 📺 支持视频文件投屏播放
-- 🎵 支持音频文件投屏播放
-- 📝 支持字幕文件选择和投屏
-- 🔍 自动发现局域网内的DLNA设备
-- 🎯 支持多音轨选择
-- 💻 简洁直观的用户界面
-- 🌐 内置HTTP媒体服务器
-- ⚡ 高效的媒体转码功能（基于FFmpeg）
+- 📺 Support video file casting
+- 🎵 Support audio file casting
+- 📝 Support subtitle file selection and casting
+- 🔍 Automatic discovery of DLNA devices within the local network
+- 🎯 Support multi-audio track selection
+- 💻 Clean and intuitive user interface
+- 🌐 Built-in HTTP media server
+- ⚡ Efficient media transcoding functionality (based on FFmpeg)
 
-## 技术栈
+## Tech Stack
 
-- **后端语言**: Go
-- **UI框架**: fyne.io
-- **媒体转码**: FFmpeg
-- **网络协议**: DLNA/UPnP
-- **构建工具**: Go Modules
+- **Backend Language**: Go
+- **UI Framework**: fyne.io
+- **Media Transcoding**: FFmpeg
+- **Network Protocol**: DLNA/UPnP
+- **Build Tool**: Go Modules
 
-## 安装方法
+## Installation
 
-### 前提条件
+### Prerequisites
 
-- 安装Go 1.18或更高版本
-- 安装FFmpeg（用于媒体转码）
+- Install Go 1.18 or higher
+- Install FFmpeg (for media transcoding)
 
-### 编译安装
+### Compilation and Installation
 
 ```bash
-# 克隆仓库
+# Clone the repository
 git clone https://github.com/cshbaoo/GoCastify.git
 cd GoCastify
 
-# 编译项目
+# Build the project
 go build
 
-# 运行应用
+# Run the application
 ./GoCastify
 ```
 
-## 使用说明
+## Usage Instructions
 
-1. 启动GoCastify应用程序
-2. 应用会自动搜索局域网内的DLNA设备
-3. 点击"选择文件"按钮，选择要投屏的媒体文件
-4. 可选：点击"选择音轨"按钮，选择要使用的音频轨道
-5. 可选：点击"选择字幕"按钮，选择要使用的字幕文件
-6. 选择目标DLNA设备
-7. 点击"开始投屏"按钮开始播放
+1. Start the GoCastify application
+2. The application will automatically search for DLNA devices in the local network
+3. Click the "Select File" button to choose the media file you want to cast
+4. Optional: Click the "Select Audio Track" button to choose the audio track you want to use
+5. Optional: Click the "Select Subtitle" button to choose the subtitle file you want to use
+6. Select the target DLNA device
+7. Click the "Start Casting" button to begin playback
 
-## 项目架构
+## Project Architecture
 
-GoCastify采用了清晰的分层架构和接口设计，主要组件包括：
+GoCastify adopts a clear layered architecture and interface design, with main components including:
 
-### 核心模块
+### Core Modules
 
-- **app/** - 应用程序的核心逻辑和状态管理
-- **interfaces/** - 定义了所有模块间交互的接口，确保模块解耦
-- **types/** - 定义了共享的数据类型，确保全项目类型统一
+- **app/** - Core logic and state management of the application
+- **interfaces/** - Defines interfaces for interactions between all modules to ensure decoupling
+- **types/** - Defines shared data types to ensure type consistency throughout the project
 
-### 功能模块
+### Functional Modules
 
-- **discovery/** - 负责DLNA设备发现，实现了`interfaces.DeviceDiscoverer`接口
-- **dlna/** - 提供DLNA设备控制功能，实现了`interfaces.DLNAController`接口
-- **server/** - 内置HTTP媒体服务器，实现了`interfaces.MediaServer`接口
-- **transcoder/** - 媒体转码功能，基于FFmpeg，实现了`interfaces.MediaTranscoder`接口
-- **ui/** - 用户界面实现
+- **discovery/** - Responsible for DLNA device discovery, implements the `interfaces.DeviceDiscoverer` interface
+- **dlna/** - Provides DLNA device control functionality, implements the `interfaces.DLNAController` interface
+- **server/** - Built-in HTTP media server, implements the `interfaces.MediaServer` interface
+- **transcoder/** - Media transcoding functionality, based on FFmpeg, implements the `interfaces.MediaTranscoder` interface
+- **ui/** - User interface implementation
 
-### 项目结构
+### Project Structure
 
 ```
 GoCastify/
 ├── app/
-│   └── app.go     # 应用主逻辑实现
+│   └── app.go     # Application main logic implementation
 ├── discovery/
-│   └── ssdp.go    # SSDP协议实现，DLNA设备发现
+│   └── ssdp.go    # SSDP protocol implementation, DLNA device discovery
 ├── dlna/
-│   └── control.go # DLNA设备控制功能
+│   └── control.go # DLNA device control functionality
 ├── interfaces/
-│   └── interfaces.go # 核心接口定义
+│   └── interfaces.go # Core interface definitions
 ├── server/
-│   └── media_server.go # HTTP媒体服务器实现
+│   └── media_server.go # HTTP media server implementation
 ├── transcoder/
-│   └── transcoder.go # 基于FFmpeg的转码实现
+│   └── transcoder.go # FFmpeg-based transcoding implementation
 ├── types/
-│   └── types.go   # 共享数据类型定义
+│   └── types.go   # Shared data type definitions
 ├── ui/
-│   └── ui.go      # 用户界面实现
-├── go.mod         # Go模块定义
-├── go.sum         # 依赖版本锁定
-└── main.go        # 程序入口
+│   └── ui.go      # User interface implementation
+├── go.mod         # Go module definition
+├── go.sum         # Dependency version locking
+└── main.go        # Program entry point
 ```
 
-## 接口设计
+## Interface Design
 
-项目采用了清晰的接口设计，主要接口包括：
+The project adopts a clear interface design, with main interfaces including:
 
 ### DLNAController
-- `PlayMediaWithContext(ctx context.Context, mediaURL string) error` - 带上下文支持的媒体播放函数
-- `GetDeviceInfo() types.DeviceInfo` - 获取设备信息
+- `PlayMediaWithContext(ctx context.Context, mediaURL string) error` - Media playback function with context support
+- `GetDeviceInfo() types.DeviceInfo` - Get device information
 
 ### MediaServer
-- `Start(mediaDir string) (string, error)` - 启动媒体服务器，返回服务器URL
-- `Stop() error` - 停止媒体服务器
-- `ServeHTTP(w http.ResponseWriter, r *http.Request)` - 处理HTTP请求
+- `Start(mediaDir string) (string, error)` - Start the media server, return server URL
+- `Stop() error` - Stop the media server
+- `ServeHTTP(w http.ResponseWriter, r *http.Request)` - Handle HTTP requests
 
 ### MediaTranscoder
-- `GetSubtitleTracks(filePath string) ([]types.SubtitleTrack, error)` - 获取媒体文件中的字幕轨道信息
-- `GetAudioTracks(filePath string) ([]types.AudioTrack, error)` - 获取媒体文件中的音频轨道信息
-- `TranscodeToMp4(inputFile string, subtitleTrackIndex int, audioTrackIndex int) (string, error)` - 将媒体文件转码为MP4格式
-- `StreamTranscode(inputFile string, subtitleTrackIndex int, audioTrackIndex int) (string, error)` - 实时流式转码
-- `Cleanup() error` - 清理临时文件和资源
+- `GetSubtitleTracks(filePath string) ([]types.SubtitleTrack, error)` - Get subtitle track information from media files
+- `GetAudioTracks(filePath string) ([]types.AudioTrack, error)` - Get audio track information from media files
+- `TranscodeToMp4(inputFile string, subtitleTrackIndex int, audioTrackIndex int) (string, error)` - Transcode media files to MP4 format
+- `StreamTranscode(inputFile string, subtitleTrackIndex int, audioTrackIndex int) (string, error)` - Real-time streaming transcoding
+- `Cleanup() error` - Clean up temporary files and resources
 
 ### DeviceDiscoverer
-- `StartSearchWithContext(ctx context.Context, onDeviceFound func(types.DeviceInfo)) error` - 开始搜索DLNA设备
-- `GetDevices() []types.DeviceInfo` - 获取已发现的设备列表
+- `StartSearchWithContext(ctx context.Context, onDeviceFound func(types.DeviceInfo)) error` - Start searching for DLNA devices
+- `GetDevices() []types.DeviceInfo` - Get the list of discovered devices
 
-## 最佳实践
+## Best Practices
 
-1. **使用带上下文的方法** - 优先使用带`WithContext`后缀的方法，它们支持超时控制和取消操作
+1. **Use Context-Supported Methods** - Prefer using methods with the `WithContext` suffix, as they support timeout control and cancellation operations
 
-2. **设备发现** - 使用`DeviceDiscoverer`接口进行设备搜索，避免直接使用具体实现
+2. **Device Discovery** - Use the `DeviceDiscoverer` interface for device search, avoiding direct use of specific implementations
 
-3. **媒体服务器** - 媒体服务器通过依赖注入接收转码器，便于测试和替换实现
+3. **Media Server** - The media server receives transcoders through dependency injection, facilitating testing and replacing implementations
 
-4. **类型安全** - 全项目使用统一的`types.DeviceInfo`类型表示设备信息
+4. **Type Safety** - The entire project uses the unified `types.DeviceInfo` type to represent device information
 
-## 开发说明
+## Development Instructions
 
-### 依赖管理
+### Dependency Management
 
-项目使用Go Modules进行依赖管理：
+The project uses Go Modules for dependency management:
 
 ```bash
-# 安装依赖
+# Install dependencies
 go mod tidy
 
-# 更新依赖
+# Update dependencies
 go get -u
 ```
 
-### 开发流程
+### Development Process
 
-1. Fork并克隆仓库
-2. 创建新的功能分支
-3. 实现功能或修复bug
-4. 确保代码可以正常编译
-5. 提交代码并创建Pull Request
+1. Fork and clone the repository
+2. Create a new feature branch
+3. Implement features or fix bugs
+4. Ensure the code can compile normally
+5. Submit code and create a Pull Request
 
-## 注意事项
+## Notes
 
-- **弃用警告** - `StartCasting`方法已弃用，请使用`StartCastingWithContext`方法以获得更好的控制和取消功能
-- **性能优化** - 设备搜索采用并发处理和信号量限制，避免过多的并发请求
-- **资源管理** - 确保正确调用`Cleanup`方法释放转码器资源
-- **错误处理** - 所有关键操作都有详细的错误处理和日志记录
+- **Deprecation Warning** - The `StartCasting` method has been deprecated, please use the `StartCastingWithContext` method for better control and cancellation functionality
+- **Performance Optimization** - Device search adopts concurrent processing and semaphore limits to avoid excessive concurrent requests
+- **Resource Management** - Ensure the `Cleanup` method is properly called to release transcoder resources
+- **Error Handling** - All critical operations have detailed error handling and logging
 
-## 许可证
+## License
 
-本项目采用自定义开源许可证，允许个人学习和非商业用途使用，但禁止任何商业用途。详情请查看LICENSE文件
+This project adopts a custom open-source license, allowing personal learning and non-commercial use, but prohibiting any commercial use. Please refer to the LICENSE file for details

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"path/filepath"
@@ -14,11 +15,51 @@ import (
 	"fyne.io/fyne/v2/layout"
 	"fyne.io/fyne/v2/widget"
 
-	app "GoCastify/app"
+	"GoCastify/app"
 	"GoCastify/discovery"
 	"GoCastify/transcoder"
 	"GoCastify/types"
 )
+
+// 常量定义
+const (
+	progressDialogWidth  = 400
+	progressDialogHeight = 200
+)
+
+// createCustomProgressDialog 创建自定义进度对话框
+func createCustomProgressDialog(title, message string, parent fyne.Window) dialog.Dialog {
+	// 创建标题和消息标签
+	titleLabel := widget.NewLabel(title)
+	titleLabel.Alignment = fyne.TextAlignCenter
+	messageLabel := widget.NewLabel(message)
+	messageLabel.Alignment = fyne.TextAlignCenter
+
+	// 创建进度条（默认隐藏）
+	progressBar := widget.NewProgressBar()
+	progressBar.Hide()
+
+	// 创建无限加载动画
+	infiniteBar := widget.NewProgressBarInfinite()
+
+	// 组织内容
+	content := container.NewVBox(
+		layout.NewSpacer(),
+		container.NewHBox(layout.NewSpacer(), titleLabel, layout.NewSpacer()),
+		container.NewHBox(layout.NewSpacer(), messageLabel, layout.NewSpacer()),
+		layout.NewSpacer(),
+		container.NewHBox(layout.NewSpacer(), infiniteBar, layout.NewSpacer()),
+		container.NewHBox(layout.NewSpacer(), progressBar, layout.NewSpacer()),
+		layout.NewSpacer(),
+	)
+
+	// 创建自定义对话框
+	dlg := dialog.NewCustom(title, "取消", content, parent)
+	dlg.Resize(fyne.NewSize(progressDialogWidth, progressDialogHeight))
+
+	// 返回对话框
+	return dlg
+}
 
 // BuildUI 构建应用程序的用户界面 - 按照苹果Human Interface Guidelines设计
 func BuildUI(app *app.App) fyne.CanvasObject {
@@ -85,7 +126,7 @@ func BuildUI(app *app.App) fyne.CanvasObject {
 
 		// 显示进度对话框
 		progressMessage := "正在搜索DLNA设备..."
-		progress := dialog.NewProgress("搜索中...", progressMessage, app.Window)
+		progress := createCustomProgressDialog("搜索中...", progressMessage, app.Window)
 		progress.Show()
 
 		// 更新状态标签
@@ -231,11 +272,26 @@ audioSelectButton := widget.NewButton("选择音轨", func() {
 
 		// 显示加载对话框
 		progressMessage := "正在准备媒体文件并连接设备..."
-		progress := dialog.NewProgress("投屏中...", progressMessage, app.Window)
-		progress.Show()
+		progressDialog := createCustomProgressDialog("投屏中...", progressMessage, app.Window)
+		progressDialog.Show()
 
 		// 在后台执行投屏
-		go app.StartCasting(progress)
+		go func() {
+			// 创建带超时的上下文
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			
+			err := app.StartCastingWithContext(ctx, progressDialog)
+			if err != nil {
+				log.Printf("投屏操作失败: %v\n", err)
+				dialog.ShowError(err, app.Window)
+			} else {
+				dialog.ShowInformation("成功", "投屏成功！\n媒体文件正在通过HTTP服务器提供", app.Window)
+			}
+			
+			// 关闭加载对话框
+			progressDialog.Hide()
+		}()
 	})
 
 	// 使用提示 - 改进文本样式和排版

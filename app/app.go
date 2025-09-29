@@ -23,10 +23,45 @@ import (
 
 // 常量定义
 const (
-	defaultMediaServerPort = 8080
-	dialogWidth            = 600
-	dialogHeight           = 450
+	defaultMediaServerPort   = 8080
+	dialogWidth              = 600
+	dialogHeight             = 450
+	progressDialogWidth      = 400
+	progressDialogHeight     = 200
 )
+
+// createCustomProgressDialog 创建自定义进度对话框
+func createCustomProgressDialog(title, message string, parent fyne.Window) dialog.Dialog {
+	// 创建标题和消息标签
+	titleLabel := widget.NewLabel(title)
+	messageLabel := widget.NewLabel(message)
+	messageLabel.Wrapping = fyne.TextWrapWord
+
+	// 创建进度条（默认隐藏）
+	progressBar := widget.NewProgressBar()
+	progressBar.Hide()
+
+	// 创建无限加载动画
+	infiniteBar := widget.NewProgressBarInfinite()
+
+	// 组织内容
+	content := container.NewVBox(
+		layout.NewSpacer(),
+		container.NewHBox(layout.NewSpacer(), titleLabel, layout.NewSpacer()),
+		container.NewHBox(layout.NewSpacer(), messageLabel, layout.NewSpacer()),
+		layout.NewSpacer(),
+		container.NewHBox(layout.NewSpacer(), infiniteBar, layout.NewSpacer()),
+		container.NewHBox(layout.NewSpacer(), progressBar, layout.NewSpacer()),
+		layout.NewSpacer(),
+	)
+
+	// 创建自定义对话框
+	dlg := dialog.NewCustom(title, "取消", content, parent)
+	dlg.Resize(fyne.NewSize(progressDialogWidth, progressDialogHeight))
+
+	// 返回对话框
+	return dlg
+}
 
 // App 表示整个应用程序的状态和功能
 type App struct {
@@ -77,7 +112,7 @@ func (app *App) CreateSearchContext() (context.Context, context.CancelFunc) {
 }
 
 // StartCastingWithContext 开始投屏操作（带上下文支持）
-func (app *App) StartCastingWithContext(ctx context.Context, progress *dialog.ProgressDialog) error {
+func (app *App) StartCastingWithContext(ctx context.Context, progress dialog.Dialog) error {
 	selectedDevice := app.Devices[app.SelectedDeviceIndex]
 	log.Printf("连接设备: %s, 地址: %s\n", selectedDevice.FriendlyName, selectedDevice.Location)
 
@@ -121,7 +156,7 @@ func (app *App) StartCastingWithContext(ctx context.Context, progress *dialog.Pr
 // 注意：此方法已弃用，请使用带上下文支持的StartCastingWithContext方法
 //
 // Deprecated: Use StartCastingWithContext instead for better control and cancellation
-func (app *App) StartCasting(progress *dialog.ProgressDialog) {
+func (app *App) StartCasting(progress dialog.Dialog) {
 	// 创建一个带有超时的上下文
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -153,7 +188,7 @@ func (app *App) SelectAudio(audioLabel *widget.Label) {
 	}
 
 	// 显示加载对话框
-	progress := dialog.NewProgress("正在获取音频信息", "请稍候...", app.Window)
+	progress := createCustomProgressDialog("正在获取音频信息", "请稍候...", app.Window)
 	progress.Show()
 
 	// 在后台获取音频轨道信息
@@ -317,7 +352,7 @@ func (app *App) SelectSubtitle(subtitleLabel *widget.Label) {
 	}
 
 	// 显示加载对话框
-	progress := dialog.NewProgress("处理中...", "正在提取视频中的字幕信息", app.Window)
+	progress := createCustomProgressDialog("处理中...", "正在提取视频中的字幕信息", app.Window)
 	progress.Show()
 
 	// 在后台提取字幕信息
