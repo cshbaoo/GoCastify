@@ -201,27 +201,20 @@ audioSelectButton := widget.NewButton("选择音轨", func() {
 	})
 
 	selectFileButton := widget.NewButton("选择文件", func() {
-		// 创建符合macOS风格的文件选择对话框
-		fileFilter := &videoFileFilter{}
-		obtainer := dialog.NewFileOpen(func(file fyne.URIReadCloser, err error) {
+		// 使用文件选择对话框并设置合适的大小
+		fileCallback := func(file fyne.URIReadCloser, err error) {
 			if err != nil {
 				dialog.ShowError(err, app.Window)
 				return
 			}
 
 			if file != nil {
-				// 关闭文件以释放资源
 				defer file.Close()
-
-				// 保存文件路径
 				app.MediaFile = file.URI().Path()
 				mediaFileLabel.SetText(filepath.Base(app.MediaFile))
-
-				// 重置音频选择
 				app.SelectedAudioIndex = -1
 				audioLabel.SetText("音轨: 默认")
 
-				// 检查文件格式是否支持
 				supported, needTranscode := transcoder.IsSupportedFormat(app.MediaFile)
 				if !supported {
 					dialog.ShowInformation("不支持的格式", "当前文件格式不受支持，请选择其他文件。", app.Window)
@@ -232,12 +225,11 @@ audioSelectButton := widget.NewButton("选择音轨", func() {
 					dialog.ShowInformation("转码功能不可用", "文件需要转码，但未找到FFmpeg。\n请安装FFmpeg以支持非MP4格式的视频。", app.Window)
 				}
 			}
-		}, app.Window)
-		// 设置文件过滤器
-		obtainer.SetFilter(fileFilter)
-		// 设置对话框属性以符合macOS设计风格
-		obtainer.SetConfirmText("打开")
-		obtainer.Resize(fyne.NewSize(800, 600))
+		}
+
+		// 创建文件对话框并设置更大的尺寸
+		obtainer := dialog.NewFileOpen(fileCallback, app.Window)
+		obtainer.Resize(fyne.NewSize(800, 600)) // 设置更大的窗口尺寸
 		obtainer.Show()
 	})
 
@@ -487,9 +479,18 @@ func (b *borderLayout) Layout(objects []fyne.CanvasObject, size fyne.Size) {
 // videoFileFilter 实现dialog.FileFilter接口，用于过滤视频文件
 type videoFileFilter struct{}
 
+// Name 返回过滤器的显示名称
+func (f *videoFileFilter) Name() string {
+	return "视频文件 (*.mp4, *.mkv, *.avi, *.wmv, *.flv, *.mov, *.mpg, *.mpeg, *.webm)"
+}
+
 // Matches 判断一个URI是否符合过滤条件
 func (f *videoFileFilter) Matches(uri fyne.URI) bool {
 	if uri == nil {
+		return false
+	}
+	// 直接使用URI的Scheme和Path来进行判断
+	if uri.Scheme() != "file" {
 		return false
 	}
 	path := uri.Path()

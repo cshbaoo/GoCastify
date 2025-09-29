@@ -78,6 +78,7 @@ type App struct {
 	SelectedAudioIndex    int
 	SearchCancel          context.CancelFunc
 	DeviceList            *widget.List
+	RecentPath            string // 最近访问的文件路径
 }
 
 // NewApp 创建一个新的应用程序实例
