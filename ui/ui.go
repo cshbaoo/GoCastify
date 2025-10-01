@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -80,6 +79,11 @@ func BuildUI(app *app.App) fyne.CanvasObject {
 	// 创建居中容器以居中显示FFmpeg状态标签
 	ffmpegStatusContainer := container.NewCenter(ffmpegStatusLabel)
 
+	// 创建设备数量标签
+	deviceCountLabel := widget.NewLabel("找到 0 个设备")
+	deviceCountLabel.TextStyle = fyne.TextStyle{Monospace: false}
+	deviceCountLabel.Alignment = fyne.TextAlignLeading
+
 	// 创建设备列表 - 改进列表项样式以符合苹果设计
 	app.DeviceList = widget.NewList(
 		func() int {
@@ -148,6 +152,8 @@ func BuildUI(app *app.App) fyne.CanvasObject {
 					// 添加设备到列表
 					app.Devices = append(app.Devices, device)
 					app.DeviceList.Refresh()
+					// 更新设备数量标签
+					deviceCountLabel.SetText(fmt.Sprintf("找到 %d 个设备", len(app.Devices)))
 				})
 			}
 
@@ -157,8 +163,11 @@ func BuildUI(app *app.App) fyne.CanvasObject {
 				log.Printf("搜索设备失败: %v\n", err)
 			}
 
-			// 在主线程中更新UI - 使用Fyne的线程安全机制
-			fyne.CurrentApp().SendNotification(&fyne.Notification{Title: "设备搜索完成", Content: fmt.Sprintf("找到 %d 个设备", len(discoverer.GetDevices()))})
+			// 在主线程中更新设备数量标签
+			time.AfterFunc(0, func() {
+				deviceCountLabel.SetText(fmt.Sprintf("找到 %d 个设备", len(app.Devices)))
+				app.Window.Canvas().Refresh(deviceCountLabel)
+			})
 			
 			// 使用time.AfterFunc确保UI更新在主线程中执行
 			time.AfterFunc(0, func() {
@@ -308,10 +317,9 @@ audioSelectButton := widget.NewButton("选择音轨", func() {
 	)
 
 	// 使用自定义卡片效果包装设备列表 - 改进卡片样式
-	deviceCount := len(app.Devices)
 	deviceCard := createCard(
 		"可用设备",
-		"找到 "+strconv.Itoa(deviceCount)+" 个设备",
+		deviceCountLabel,
 		app.DeviceList,
 	)
 	// 设置卡片最小高度
@@ -321,10 +329,15 @@ audioSelectButton := widget.NewButton("选择音轨", func() {
 	}
 	deviceCard.Resize(size)
 
+	// 创建使用指南描述标签
+	tipsDescLabel := widget.NewLabel("简单四步，轻松投屏")
+	tipsDescLabel.TextStyle = fyne.TextStyle{Italic: false}
+	tipsDescLabel.Alignment = fyne.TextAlignLeading
+	
 	// 使用自定义卡片效果包装使用提示
 	tipsCard := createCard(
 		"使用指南",
-		"简单四步，轻松投屏",
+		tipsDescLabel,
 		tipsLabel,
 	)
 	// 设置卡片最小高度
@@ -345,9 +358,14 @@ audioSelectButton := widget.NewButton("选择音轨", func() {
 			layout.NewSpacer(),
 		),
 	)
+	// 创建文件选择描述标签
+	fileDescLabel := widget.NewLabel("请选择要投屏的视频文件")
+	fileDescLabel.TextStyle = fyne.TextStyle{Italic: false}
+	fileDescLabel.Alignment = fyne.TextAlignLeading
+	
 	fileCard := createCard(
 		"选择文件",
-		"请选择要投屏的视频文件",
+		fileDescLabel,
 		fileSelectContent,
 	)
 
@@ -386,15 +404,13 @@ audioSelectButton := widget.NewButton("选择音轨", func() {
 }
 
 // createCard 创建一个符合苹果设计风格的带标题和描述的卡片
-func createCard(title, description string, content fyne.CanvasObject) fyne.CanvasObject {
+func createCard(title string, descriptionLabel *widget.Label, content fyne.CanvasObject) fyne.CanvasObject {
 	titleLabel := widget.NewLabel(title)
 	titleLabel.TextStyle = fyne.TextStyle{Bold: true} // 标题使用粗体
 	titleLabel.Alignment = fyne.TextAlignLeading
 	titleLabel.Resize(fyne.NewSize(400, 25))
 
-	descLabel := widget.NewLabel(description)
-	descLabel.TextStyle = fyne.TextStyle{Italic: false} // 描述不使用斜体，更符合苹果风格
-	descLabel.Alignment = fyne.TextAlignLeading
+	descLabel := descriptionLabel
 	descLabel.Resize(fyne.NewSize(400, 20))
 
 	// 创建带内边距的内容容器，增加留白空间
